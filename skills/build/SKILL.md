@@ -8,8 +8,9 @@ argument-hint: "<the idea, or a path to a file holding it>"
 
 The idea: $ARGUMENTS
 
-1. If the idea is empty, ask for it in one line and stop. If it's a path to a file, read the file and use its text.
-2. Name the project: a short kebab-case folder name from the idea, two to four words. It goes in a new folder under the current working directory, unless the user named another place. If that folder already exists and isn't empty, pick another name. Tell the user the full path in one line.
+1. Check that you have the Workflow tool. If it isn't listed, search for it with ToolSearch (`select:Workflow`). If there's no Workflow tool, stop before creating anything and tell the user: roughcut needs dynamic workflows, which some plans have off by default, and adding `"enableWorkflows": true` to `~/.claude/settings.json` (or turning on Dynamic workflows in `/config`) turns them on for new sessions.
+   If the idea is empty, ask for it in one line and stop. If it's a path to a file, read the file and use its text.
+2. Name the project: a short kebab-case folder name from the idea, two to four words. It goes in a new folder under the current working directory, unless the user named another place. If that folder already exists, check it: when it has a `.hub/` whose round 0 never ran (`hub.py status` shows round 0 and no tasks, and there's no `.hub/rounds/0.md`), reuse it and skip step 3. Otherwise, if it isn't empty, pick another name. Tell the user the full path in one line.
 3. Create the project's hub, passing the idea exactly as given:
 
    ```bash
