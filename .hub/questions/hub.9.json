@@ -1,0 +1,16 @@
+{
+  "affects": [],
+  "answer": null,
+  "choice": null,
+  "critical": true,
+  "id": "hub.9",
+  "options": [
+    "Same project: fold that note's ideas in",
+    "Separate projects"
+  ],
+  "round": 0,
+  "status": "open",
+  "task": "hub",
+  "text": "Is this the same project as your 2026-10-05 note on a design-first AI dev tool (CODE/AI-system-design-tool-idea.txt)?",
+  "why": "That note wants a structured spec, decisions with reasons, and links from code back to requirements. This tool already has the first two. The big difference: it builds before asking."
+}

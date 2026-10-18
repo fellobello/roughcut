@@ -1,0 +1,3 @@
+I'm interested in a system where I can keep my software ideas. So far I just have notebooks where I log my ideas; it's simple and works. I want a way to upload my ideas somewhere, where Claude can take what I've given it and build as much of it as possible, in a smart, modular way that doesn't make big assumptions.
+
+A basic flow: I say "I want to build an app that does x, y and z." Claude takes that and sets up a hub to organize the agents, deploys an agent for each module, connects all the code back together, and has an agent that synthesizes. One agent collects to-dos and questions that need my input, including non-critical decisions it made that I may want to change, and one agent tests. All of it as asynchronous as possible.

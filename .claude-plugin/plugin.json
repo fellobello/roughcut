@@ -1,0 +1,10 @@
+{
+  "name": "idea-builder",
+  "displayName": "Idea Builder",
+  "version": "0.1.0",
+  "description": "Turn a software idea into a working sample. Agents plan it, build the modules in parallel, merge and test them, and hand you a short list of questions after each round.",
+  "author": {
+    "name": "Steven Cochrane"
+  },
+  "keywords": ["agents", "workflow", "prototyping", "planning"]
+}

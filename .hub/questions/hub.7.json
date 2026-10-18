@@ -1,0 +1,13 @@
+{
+  "affects": [],
+  "answer": null,
+  "choice": "idea-builder (a placeholder)",
+  "critical": true,
+  "id": "hub.7",
+  "options": [],
+  "round": 0,
+  "status": "decided",
+  "task": "hub",
+  "text": "What's it called?",
+  "why": "Plain and searchable until you pick a real name."
+}

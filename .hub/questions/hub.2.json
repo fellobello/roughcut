@@ -1,0 +1,16 @@
+{
+  "affects": [],
+  "answer": null,
+  "choice": "Python 3, standard library only",
+  "critical": true,
+  "id": "hub.2",
+  "options": [
+    "Node.js",
+    "No script: agents edit the JSON files directly"
+  ],
+  "round": 0,
+  "status": "decided",
+  "task": "hub",
+  "text": "What language is the hub in?",
+  "why": "Nothing to install, easy to test, and already on most developers' machines."
+}

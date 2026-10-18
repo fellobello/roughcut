@@ -1,0 +1,17 @@
+{
+  "affects": [],
+  "answer": null,
+  "choice": null,
+  "critical": true,
+  "id": "hub.8",
+  "options": [
+    "MIT",
+    "Apache-2.0",
+    "None for now (all rights reserved)"
+  ],
+  "round": 0,
+  "status": "open",
+  "task": "hub",
+  "text": "Which license should the code have?",
+  "why": "Other developers can't legally reuse it without one."
+}
