@@ -14,8 +14,8 @@ The hub command, called HUB below, is:
 2. Read `.hub/spec.md` in the project folder and the interface files it names.
 3. Work only inside your worktree. Don't touch `.hub/`, and don't change the interfaces. If an interface is wrong, log it (step 5) and build against it as written.
 4. Build the module with its own unit tests. Use placeholders for any art or assets. Before you finish, run the test command from spec.md for your part.
-5. Log your decisions as you go:
-   - A small choice (a library, file layout, naming, a UI detail): pick one and log it.
+5. Log the decisions someone using or extending the app would notice: behavior, defaults, limits, data formats, libraries, outside services. Don't log internal details such as helper names, file layout inside your module, test structure or error wording. Aim for a handful per task, not dozens.
+   - A small choice: pick one and log it.
      `HUB ask --task <id> --text "<the choice>" --choice "<what you picked>" --why "<one line>"`
    - A big choice that has a sensible default: pick the default, and mark it critical so the user sees it first.
      `HUB ask --task <id> --critical --text "..." --choice "..." --why "..." --option "..."`

@@ -1,0 +1,13 @@
+{
+  "affects": [],
+  "answer": null,
+  "choice": "The next run releases it back to todo without using up an attempt, and keeps its worktree",
+  "critical": false,
+  "id": "hub.20",
+  "options": [],
+  "round": 2,
+  "status": "decided",
+  "task": "hub",
+  "text": "What happens to a task whose agent died mid-run?",
+  "why": "A usage limit isn't the task's fault, and the half-done work is worth keeping."
+}

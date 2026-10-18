@@ -1,6 +1,6 @@
 # Questions
 
-_Round 1. Generated from `.hub/questions/` by `hub.py render`, so don't edit it by hand. Answer in Claude Code with `/roughcut:answer`._
+_Round 2. Generated from `.hub/questions/` by `hub.py render`, so don't edit it by hand. Answer in Claude Code with `/roughcut:answer`._
 
 ## Big guesses to confirm (0)
 
@@ -12,19 +12,23 @@ None.
 
 None.
 
-## Smaller decisions this round (2)
+## Smaller decisions this round (6)
 
-Already built this way. Change any you disagree with.
+Already built this way. Change any you disagree with; the reasons are in `.hub/questions/`.
 
-### `hub.16` Where are usage readings saved?
+<details>
+<summary>Show all 6</summary>
 
-- **Picked:** ~/.claude/roughcut/usage.json (ROUGHCUT_USAGE_FILE overrides it)
-- **Why:** Outside any project, so every project's rounds read the same file.
+- `hub.18` How many tasks run at once? → **Up to 4 per wave (the maxParallel arg changes it)**
+- `hub.19` Which ready tasks go first when a wave is capped? → **The ones the most other tasks wait on, then builds before tests**
+- `hub.20` What happens to a task whose agent died mid-run? → **The next run releases it back to todo without using up an attempt, and keeps its worktree**
+- `hub.21` When a round stops early, does it still write QUESTIONS.md? → **No; it stops right away and the next run finishes the round**
+- `hub.22` How are smaller decisions shown? → **One line each in a collapsed list; the questioner promotes the important ones to the big guesses and dismisses internal details**
+- `hub.23` What about usage numbers, now that the desktop app doesn't seem to run status lines? → **Keep the feature; it works in terminal sessions, and reports just leave usage out in the app**
 
-### `hub.17` When are usage readings taken?
+</details>
 
-- **Picked:** By the build and answer commands, right before and right after each round
-- **Why:** The status line only updates when your main session gets a reply, so readings taken inside a round would be stale.
+_Plus 2 smaller decisions from earlier rounds in `.hub/questions/`._
 
 ## Settled (15)
 

@@ -1,0 +1,15 @@
+{
+  "affects": [],
+  "answer": null,
+  "choice": "Up to 4 per wave (the maxParallel arg changes it)",
+  "critical": false,
+  "id": "hub.18",
+  "options": [
+    "Every ready task at once"
+  ],
+  "round": 2,
+  "status": "decided",
+  "task": "hub",
+  "text": "How many tasks run at once?",
+  "why": "The first real run started 10 at once and all of them died together at the usage limit. Smaller waves also fit the 'small' workflow size that Pro plans default to."
+}

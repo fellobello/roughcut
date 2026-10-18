@@ -14,7 +14,7 @@ export const meta = {
 // so nothing here waits on them. All state lives in <project>/.hub and only hub.py writes it;
 // this script decides what runs when, and the agents do the work.
 
-const MAX_WAVES = 10 // per build pass; a longer dependency chain finishes next round
+const MAX_WAVES = 20 // per build pass; a longer dependency chain finishes next round
 const MAX_FIX_PASSES = 2 // build passes after the first that only fix failing tests
 
 if (!args || !args.project || !args.pluginRoot) {
@@ -22,6 +22,9 @@ if (!args || !args.project || !args.pluginRoot) {
 }
 const project = args.project
 const round = args.round || 0
+// Tasks per wave. Small waves keep a round inside plan usage limits for longer,
+// and when a limit does hit, fewer agents fail at once.
+const maxParallel = args.maxParallel || 4
 const HUB = `python3 "${args.pluginRoot}/scripts/hub.py" --project "${project}"`
 
 const TASK = {
@@ -85,17 +88,20 @@ function context(...lines) {
   return [`Project folder: ${project}`, `Round: ${round}`, ...lines].join('\n')
 }
 
-// Run waves until nothing is ready: each wave starts every unblocked task at once,
+// Run waves until nothing is ready: each wave starts up to maxParallel unblocked tasks,
 // then merges them all before the next wave, so later tasks build on merged code.
+// Returns `stopped` with a reason when a step dies (a null result), usually at a usage
+// limit: the round ends there, and its next run picks up the unfinished tasks.
 async function buildPass(firstWave) {
   let wave = firstWave
   const results = []
   for (; wave < firstWave + MAX_WAVES; wave++) {
     const started = await agent(
-      `Run this command and return the tasks it prints, unchanged:\n${HUB} start-wave`,
+      `Run this command and return the tasks it prints, unchanged:\n${HUB} start-wave --limit ${maxParallel}`,
       { label: `schedule:wave-${wave}`, phase: 'Build', effort: 'low', schema: WAVE_SCHEMA },
     )
-    if (!started || started.tasks.length === 0) break
+    if (!started) return { nextWave: wave, results, stopped: `the scheduler for wave ${wave} stopped` }
+    if (started.tasks.length === 0) break
     const ids = started.tasks.map(t => t.id)
     log(`Wave ${wave}: ${ids.join(', ')}`)
     const finished = await parallel(started.tasks.map(task => () => agent(
@@ -111,15 +117,20 @@ async function buildPass(firstWave) {
         schema: RESULT_SCHEMA,
       },
     )))
-    results.push(...finished.filter(Boolean))
-    await agent(context(`Wave ${wave} tasks: ${ids.join(', ')}`), {
+    const ok = finished.filter(Boolean)
+    results.push(...ok)
+    if (ok.length === 0) {
+      return { nextWave: wave + 1, results, stopped: `every agent in wave ${wave} stopped (${ids.join(', ')})` }
+    }
+    const merged = await agent(context(`Wave ${wave} tasks: ${ids.join(', ')}`), {
       label: `merge:wave-${wave}`,
       phase: 'Build',
       agentType: 'roughcut:synthesizer',
       schema: MERGE_SCHEMA,
     })
+    if (!merged) return { nextWave: wave + 1, results, stopped: `the merge of wave ${wave} stopped` }
   }
-  return { nextWave: wave, results }
+  return { nextWave: wave, results, stopped: null }
 }
 
 phase('Plan')
@@ -133,24 +144,36 @@ if (!plan) throw new Error('the planner stopped before finishing, so nothing was
 
 const built = []
 const checks = []
+let stopped = null
 if (plan.todo > 0) {
   phase('Build')
   let pass = await buildPass(1)
   built.push(...pass.results)
-  phase('Verify')
-  for (let fix = 0; fix <= MAX_FIX_PASSES; fix++) {
+  stopped = pass.stopped
+  if (!stopped) phase('Verify')
+  for (let fix = 0; !stopped && fix <= MAX_FIX_PASSES; fix++) {
     const check = await agent(context('Job: verify the merged code.'), {
       label: `verify:${fix + 1}`,
       phase: 'Verify',
       agentType: 'roughcut:tester',
       schema: VERIFY_SCHEMA,
     })
-    if (check) checks.push(check)
-    if (!check || check.passed || check.reopened.length === 0 || fix === MAX_FIX_PASSES) break
+    if (!check) {
+      stopped = 'the verifier stopped'
+      break
+    }
+    checks.push(check)
+    if (check.passed || check.reopened.length === 0 || fix === MAX_FIX_PASSES) break
     log(`Fixing: ${check.reopened.join(', ')}`)
     pass = await buildPass(pass.nextWave)
     built.push(...pass.results)
+    stopped = pass.stopped
   }
+}
+if (stopped) {
+  // Skip the questions step: it would most likely stop the same way.
+  log(`Round stopped: ${stopped}. Finished work is kept; run the round again to continue.`)
+  return { round, plan, built, checks, report: null, stopped }
 }
 
 phase('Questions')
@@ -161,4 +184,5 @@ const report = await agent(context(), {
   schema: REPORT_SCHEMA,
 })
 
-return { round, plan, built, checks, report }
+if (!report) return { round, plan, built, checks, report: null, stopped: 'the questions step stopped' }
+return { round, plan, built, checks, report, stopped: null }

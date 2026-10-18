@@ -1,0 +1,13 @@
+{
+  "affects": [],
+  "answer": null,
+  "choice": "One line each in a collapsed list; the questioner promotes the important ones to the big guesses and dismisses internal details",
+  "critical": false,
+  "id": "hub.22",
+  "options": [],
+  "round": 2,
+  "status": "decided",
+  "task": "hub",
+  "text": "How are smaller decisions shown?",
+  "why": "The first real run logged 59, far too many to read."
+}

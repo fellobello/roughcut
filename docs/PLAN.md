@@ -16,7 +16,7 @@ Submit a software idea and get back as much of a working sample as can be built 
 
 | Piece | File | Job |
 | --- | --- | --- |
-| Orchestrator | `workflows/round.js` | Runs one round: plan → waves of parallel tasks → merge → verify → questions. Holds no state. |
+| Orchestrator | `workflows/round.js` | Runs one round: plan → waves of up to 4 parallel tasks → merge → verify → questions. Holds no state. |
 | Hub | `scripts/hub.py` | The only writer of `.hub/`. Tasks, the dependency graph, worktrees, questions, decisions, reports. |
 | Planner | `agents/planner.md` | Idea → spec, interface code, tasks. Later rounds: answers → updated spec and new tasks. |
 | Builder | `agents/builder.md` | Builds one module in its own worktree against the interfaces. |
@@ -35,12 +35,14 @@ Every agent changes state only through `python3 scripts/hub.py --project <folder
 | `init --idea-file -` | build skill | Creates `.hub/`, and a git repo if the folder isn't its own repo |
 | `add-task <id> --title --kind build\|test --depends a,b` | planner | Adds a task |
 | `check` | planner, `start-wave` | Missing dependencies and cycles |
-| `start-wave` | orchestrator | Starts every ready task on its own branch and worktree off the current `HEAD` |
+| `start-wave --limit <n>` | orchestrator | Starts up to n ready tasks, the ones others wait on first, each on its own branch and worktree off the current `HEAD` |
 | `finish <id> --status done\|blocked\|failed` | builder, tester, synthesizer | Ends a task's attempt |
 | `ask --task <id> --text [--critical] [--choice] --why --option --affects` | everyone | Logs a decision (has `--choice`) or asks a blocking question (critical, no choice) |
 | `answer <id> --text \| --keep` | answer skill | Settles a question; changing a decision sends the done tasks built on it back to `todo` |
 | `reopen <id> --reason` | tester, synthesizer | Sends a done task back; after 3 attempts it becomes a question for the user |
 | `cleanup <id>` | synthesizer | Removes the worktree, and the branch once merged |
+| `release` | planner | Returns tasks a stopped run left in progress to `todo`, keeping their worktrees and not using up an attempt |
+| `promote <id>` | questioner | Moves a smaller decision up to the big guesses |
 | `dismiss <id> --reason` | questioner | Closes a duplicate question |
 | `render`, `report --notes` | questioner | Writes `QUESTIONS.md` and `.hub/rounds/<n>.md` |
 | `usage --mark start\|end` | build and answer skills | Saves the status line's latest usage reading; the report shows the difference |
@@ -58,6 +60,10 @@ todo ──start-wave──► in_progress ──finish──► done ──reop
 ```
 
 A task is ready when it's `todo`, nothing blocks it, and every task it depends on is `done`.
+
+### When a round stops early
+
+Any step can die, most often at a usage limit. When a whole wave of agents, a merge, the scheduler or the verifier comes back empty, the round stops instead of starting more agents that would die the same way. Finished work is already merged and committed. Running the same round again picks up from there: the planner releases the tasks that were in progress and sees the round is already planned.
 
 ### Questions and decisions
 

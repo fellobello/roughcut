@@ -1,0 +1,13 @@
+{
+  "affects": [],
+  "answer": null,
+  "choice": "No; it stops right away and the next run finishes the round",
+  "critical": false,
+  "id": "hub.21",
+  "options": [],
+  "round": 2,
+  "status": "decided",
+  "task": "hub",
+  "text": "When a round stops early, does it still write QUESTIONS.md?",
+  "why": "Whatever stopped it, usually a usage limit, would stop the questions step too."
+}

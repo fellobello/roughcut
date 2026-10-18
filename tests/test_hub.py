@@ -167,6 +167,60 @@ class WaveTest(HubTest):
         self.assertNotEqual(second["branch"], first["branch"])
 
 
+class ReleaseTest(HubTest):
+    def test_release_keeps_the_worktree_and_the_attempt(self):
+        self.hub.add_task("a", "A")
+        self.commit_all()
+        first = self.hub.start_wave()["tasks"][0]
+        (Path(first["worktree"]) / "draft.txt").write_text("half done")
+        self.assertEqual(self.hub.release(), {"released": ["a"]})
+        task = self.hub.task("a")
+        self.assertEqual((task["status"], task["attempts"]), ("todo", 0))
+        again = self.hub.start_wave()["tasks"][0]
+        self.assertEqual((again["branch"], again["attempts"]), (first["branch"], 1))
+        self.assertEqual((Path(again["worktree"]) / "draft.txt").read_text(), "half done")
+
+    def test_release_with_a_missing_folder_keeps_the_branch(self):
+        self.hub.add_task("a", "A")
+        self.commit_all()
+        first = self.hub.start_wave()["tasks"][0]
+        (Path(first["worktree"]) / "a.txt").write_text("committed work")
+        git(first["worktree"], "add", "-A")
+        git(first["worktree"], "commit", "-q", "-m", "work")
+        git(self.project, "worktree", "remove", "--force", first["worktree"])
+        self.hub.release()
+        again = self.hub.start_wave()["tasks"][0]
+        self.assertEqual(again["branch"], first["branch"])
+        self.assertEqual((Path(again["worktree"]) / "a.txt").read_text(), "committed work")
+
+    def test_release_ignores_other_tasks(self):
+        self.hub.add_task("a", "A")
+        self.hub.add_task("b", "B")
+        self.commit_all()
+        self.hub.start_wave(limit=1)
+        self.hub.finish("a", "done")
+        self.assertEqual(self.hub.release(), {"released": []})
+
+
+class ReadyOrderTest(HubTest):
+    def test_tasks_others_wait_on_come_first_then_builds(self):
+        self.hub.add_task("a-tests", "A tests", kind="test", module="a")
+        self.hub.add_task("a", "A")
+        self.hub.add_task("core", "Core")
+        self.hub.add_task("mid", "Mid", depends_on=["core"])
+        self.hub.add_task("top", "Top", depends_on=["mid"])
+        self.hub.add_task("side", "Side")
+        self.hub.add_task("leaf", "Leaf", depends_on=["side"])
+        self.assertEqual([t["id"] for t in self.hub.ready()], ["core", "side", "a", "a-tests"])
+
+    def test_limit_takes_the_most_useful_tasks(self):
+        self.hub.add_task("z-tests", "Z tests", kind="test", module="z")
+        self.hub.add_task("core", "Core")
+        self.hub.add_task("ui", "UI", depends_on=["core"])
+        self.commit_all()
+        self.assertEqual([t["id"] for t in self.hub.start_wave(limit=1)["tasks"]], ["core"])
+
+
 class QuestionTest(HubTest):
     def test_blocking_question_holds_tasks_until_answered(self):
         self.hub.add_task("map", "Map")
@@ -233,6 +287,15 @@ class QuestionTest(HubTest):
         ]
         self.assertEqual(ids, ["a.1", "hub.1", "a.2"])
 
+    def test_promote_moves_a_decision_to_the_big_guesses(self):
+        self.hub.add_task("a", "A")
+        self.hub.ask("a", "Which router?", choice="Valhalla")
+        self.assertTrue(self.hub.promote("a.1")["critical"])
+        self.assertEqual(self.hub.status()["guesses_to_confirm"], ["a.1"])
+        self.hub.ask("hub", "Open question", critical=True)
+        with self.assertRaises(HubError):
+            self.hub.promote("hub.1")
+
     def test_dismiss_unblocks(self):
         self.hub.add_task("a", "A")
         self.hub.ask("hub", "Duplicate question", critical=True, affects=["a"])
@@ -265,6 +328,8 @@ class OutputTest(HubTest):
                                          "Which map tiles?", "Smaller decisions", "Which test runner?")]
         self.assertEqual(order, sorted(order))
         self.assertIn("- **Blocks:** a", text)
+        self.assertIn("- `a.1` Which test runner? → **pytest**", text)
+        self.assertIn("<summary>Show all 1</summary>", text)
 
     def test_report_lists_tasks(self):
         self.hub.add_task("a", "A")

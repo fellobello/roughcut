@@ -1,0 +1,13 @@
+{
+  "affects": [],
+  "answer": null,
+  "choice": "The ones the most other tasks wait on, then builds before tests",
+  "critical": false,
+  "id": "hub.19",
+  "options": [],
+  "round": 2,
+  "status": "decided",
+  "task": "hub",
+  "text": "Which ready tasks go first when a wave is capped?",
+  "why": "Unblocks the next wave sooner."
+}

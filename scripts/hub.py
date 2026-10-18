@@ -211,13 +211,26 @@ class Hub:
         return errors
 
     def ready(self):
+        """Tasks that can start now, most useful first: the ones more tasks wait on, then builds before tests."""
         tasks = {t["id"]: t for t in self.tasks()}
-        return [
+        waiting_on = {task_id: set() for task_id in tasks}  # task -> every task downstream of it
+        for task in tasks.values():
+            stack = list(task["depends_on"])
+            seen = set()
+            while stack:
+                dep = stack.pop()
+                if dep in seen or dep not in tasks:
+                    continue
+                seen.add(dep)
+                waiting_on[dep].add(task["id"])
+                stack.extend(tasks[dep]["depends_on"])
+        ready = [
             t for t in tasks.values()
             if t["status"] == "todo"
             and not t["blocked_by"]
             and all(tasks.get(dep, {}).get("status") == "done" for dep in t["depends_on"])
         ]
+        return sorted(ready, key=lambda t: (-len(waiting_on[t["id"]]), t["kind"] != "build", t["id"]))
 
     def start_wave(self, limit=None):
         """Start every ready task: give each its own branch and worktree off the current HEAD."""
@@ -231,14 +244,19 @@ class Hub:
             current_round = self.config()["round"]
             started = []
             for task in self.ready()[:limit]:
-                if task["branch"] and self._branch_exists(task["branch"]):
-                    task["previous_branches"].append(task["branch"])
-                task["attempts"] += 1
-                branch = f"build/{task['id']}-{task['attempts']}"
+                branch = f"build/{task['id']}-{task['attempts'] + 1}"
                 worktree = self.worktrees_dir / task["id"]
-                if worktree.exists():
-                    self._git("worktree", "remove", "--force", str(worktree))
-                self._git("worktree", "add", "-q", "-B", branch, str(worktree), "HEAD")
+                if task["branch"] == branch and worktree.exists():
+                    pass  # released after a stopped run: keep its worktree and any work in it
+                elif task["branch"] == branch and self._branch_exists(branch):
+                    self._git("worktree", "add", "-q", str(worktree), branch)  # same, but the folder is gone
+                else:
+                    if task["branch"] and self._branch_exists(task["branch"]):
+                        task["previous_branches"].append(task["branch"])
+                    if worktree.exists():
+                        self._git("worktree", "remove", "--force", str(worktree))
+                    self._git("worktree", "add", "-q", "-B", branch, str(worktree), "HEAD")
+                task["attempts"] += 1
                 task.update(status="in_progress", branch=branch, worktree=str(worktree), round=current_round)
                 self._save_task(task)
                 started.append(task)
@@ -262,6 +280,24 @@ class Hub:
             task["summary"] = summary.strip() or task["summary"]
             self._save_task(task)
             return task
+
+    def release(self):
+        """Return tasks a stopped run left in progress to todo, without using up an attempt.
+
+        Their worktrees and branches stay, so the next attempt can pick up any work in them.
+        Call it only when no round is running.
+        """
+        with self.locked():
+            released = []
+            for task in self.tasks():
+                if task["status"] != "in_progress":
+                    continue
+                task["status"] = "todo"
+                task["attempts"] = max(0, task["attempts"] - 1)
+                task["notes"].append("released: the run stopped before this task finished")
+                self._save_task(task)
+                released.append(task["id"])
+            return {"released": released}
 
     def reopen(self, task_id, reason):
         """Send a done task back for another attempt, or to the user once it's out of attempts."""
@@ -396,6 +432,16 @@ class Hub:
                 self._save_task(task)
             return {"question": question, "unblocked": unblocked, "reworked": reworked}
 
+    def promote(self, question_id):
+        """Mark a smaller decision critical, so QUESTIONS.md lists it with the big guesses."""
+        with self.locked():
+            question = self.question(question_id)
+            if question["status"] != "decided":
+                raise HubError(f"only decided decisions can be promoted; {question_id} is {question['status']}")
+            question["critical"] = True
+            self._write(self.questions_dir / f"{question_id}.json", question)
+            return question
+
     def dismiss(self, question_id, reason):
         """Close a question without an answer, for example a duplicate. Unblocks its tasks."""
         with self.locked():
@@ -474,15 +520,18 @@ class Hub:
             out += entry(q, "Suggested")
         if not blocking:
             out += ["None.", ""]
-        out += [
-            f"## Smaller decisions this round ({len(recent)})",
-            "",
-            "Already built this way. Change any you disagree with.",
-            "",
-        ]
-        for q in recent:
-            out += entry(q, "Picked")
-        if not recent:
+        out += [f"## Smaller decisions this round ({len(recent)})", ""]
+        if recent:
+            out += [
+                "Already built this way. Change any you disagree with; the reasons are in `.hub/questions/`.",
+                "",
+                "<details>",
+                f"<summary>Show all {len(recent)}</summary>",
+                "",
+            ]
+            out += [f"- `{q['id']}` {q['text']} → **{q['choice']}**" for q in recent]
+            out += ["", "</details>", ""]
+        else:
             out += ["None.", ""]
         if len(decisions) > len(recent):
             out += [f"_Plus {len(decisions) - len(recent)} smaller decisions from earlier rounds in `.hub/questions/`._", ""]
@@ -622,6 +671,7 @@ def build_parser():
     p = sub.add_parser("reopen", help="send a done task back, for example after a failing test")
     p.add_argument("id")
     p.add_argument("--reason", required=True)
+    sub.add_parser("release", help="return tasks a stopped run left in progress to todo")
     p = sub.add_parser("cleanup", help="remove a task's worktree, and its branch once merged")
     p.add_argument("id")
 
@@ -638,6 +688,8 @@ def build_parser():
     p.add_argument("id")
     p.add_argument("--text")
     p.add_argument("--keep", action="store_true", help="confirm a decision as it is")
+    p = sub.add_parser("promote", help="move a smaller decision up to the big guesses")
+    p.add_argument("id")
     p = sub.add_parser("dismiss", help="close a question without answering it")
     p.add_argument("id")
     p.add_argument("--reason", required=True)
@@ -681,12 +733,16 @@ def run(hub, args):
         return hub.finish(args.id, args.status, args.summary)
     if command == "reopen":
         return hub.reopen(args.id, args.reason)
+    if command == "release":
+        return hub.release()
     if command == "cleanup":
         return hub.cleanup(args.id)
     if command == "ask":
         return hub.ask(args.task, args.text, args.critical, args.choice, args.why, args.option, split_ids(args.affects))
     if command == "answer":
         return hub.answer(args.id, args.text, args.keep)
+    if command == "promote":
+        return hub.promote(args.id)
     if command == "dismiss":
         return hub.dismiss(args.id, args.reason)
     if command == "questions":

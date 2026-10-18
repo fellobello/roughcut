@@ -65,7 +65,7 @@ claude plugin install roughcut@roughcut
 | `/roughcut:answer [folder]` | Goes through the questions with you, then runs the next round |
 | `/roughcut:status [folder]` | Shows the round, what's built, and what needs you |
 
-Each round counts toward your Claude usage. The workflow asks before it starts, and you can stop it from `/workflows`.
+Each round counts toward your Claude usage, and a round can use a lot: the first real one, a 12-task map app, took about 3 million tokens. The workflow asks before it starts, you can stop it from `/workflows`, and it runs at most 4 tasks at a time. If a round stops early, for example at a usage limit, finished work is kept and the next `/roughcut:answer` picks up where it stopped.
 
 ### Usage numbers in reports (optional)
 
@@ -107,7 +107,7 @@ my-idea/
 | `scripts/usage_statusline.py` | Optional status line that saves usage numbers for the reports |
 | `agents/` | The five roles: planner, builder, tester, synthesizer, questioner |
 | `skills/` | The three commands |
-| `tests/` | Unit tests for both scripts: `python3 -m unittest discover -s tests` |
+| `tests/` | `python3 -m unittest discover -s tests` for the scripts, `node --test tests/round.test.mjs` for the workflow |
 | `docs/PLAN.md` | The design, and what's planned next |
 
 Built with Claude Code.

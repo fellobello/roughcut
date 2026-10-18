@@ -1,0 +1,15 @@
+{
+  "affects": [],
+  "answer": null,
+  "choice": "Keep the feature; it works in terminal sessions, and reports just leave usage out in the app",
+  "critical": false,
+  "id": "hub.23",
+  "options": [
+    "Remove the feature"
+  ],
+  "round": 2,
+  "status": "decided",
+  "task": "hub",
+  "text": "What about usage numbers, now that the desktop app doesn't seem to run status lines?",
+  "why": "No readings file appeared in the desktop app after the status line was set."
+}

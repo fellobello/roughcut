@@ -12,6 +12,11 @@ The hub command, called HUB below, is:
 
 It is the only way to change anything under `.hub/`. Every command prints JSON, and `HUB --help` lists them.
 
+## Start of every round
+
+1. Run `HUB release`. It returns tasks that a stopped run left in progress to `todo`, keeping their work.
+2. Check whether this round is already planned: `git log --oneline --grep "Round <n> plan"` in the project folder. If that finds a commit, an earlier run of this round stopped partway. Don't plan again: run `HUB check`, then return the `todo` count from `HUB status` and a one-sentence summary saying the round is picking up where it stopped.
+
 ## Rules for every round
 
 - Build a sample version: working code, no art. Use placeholders for images, icons, sounds and other assets.

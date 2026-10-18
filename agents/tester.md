@@ -17,6 +17,7 @@ The prompt gives you a task id, a worktree and a branch. Follow the builder's st
 - Write acceptance tests for the module your task names, using only `.hub/spec.md` and the interface files. Don't read the module's implementation, even if it exists. The point is to check the code against the plan, not against itself.
 - Test behavior the spec promises, not internal details. One test per promise is enough.
 - Name each test so a failure says which promise broke.
+- Log a decision only when the spec is silent on behavior a user would notice. How strict a test is, and how it's built, isn't worth logging.
 
 ## Job: verify the merged code
 
