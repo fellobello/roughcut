@@ -6,10 +6,10 @@ Submit a software idea and get back as much of a working sample as can be built 
 
 ## The loop
 
-1. **Submit.** `/idea-builder:build <idea>` creates a project folder and its `.hub/`.
+1. **Submit.** `/roughcut:build <idea>` creates a project folder and its `.hub/`.
 2. **Round 0.** Plans the idea and builds without asking anything. Big choices get a default and are logged as guesses.
 3. **Questions.** `QUESTIONS.md` lists, in order: big guesses to confirm, questions that block work, and the round's smaller decisions. Answering them is the one approval step.
-4. **Next round.** `/idea-builder:answer` records the answers and runs another round, which builds on them.
+4. **Next round.** `/roughcut:answer` records the answers and runs another round, which builds on them.
 5. **Repeat** until no questions are left and the sample is complete. The user can stop after any round, which is how they control time and usage.
 
 ## Pieces
@@ -43,6 +43,7 @@ Every agent changes state only through `python3 scripts/hub.py --project <folder
 | `cleanup <id>` | synthesizer | Removes the worktree, and the branch once merged |
 | `dismiss <id> --reason` | questioner | Closes a duplicate question |
 | `render`, `report --notes` | questioner | Writes `QUESTIONS.md` and `.hub/rounds/<n>.md` |
+| `usage --mark start\|end` | build and answer skills | Saves the status line's latest usage reading; the report shows the difference |
 | `status`, `tasks`, `task`, `questions`, `ready` | anyone | Read-only |
 | `next-round` | answer skill | Moves to the next round |
 
@@ -75,6 +76,5 @@ Each agent returns structured output, checked against a JSON schema in `round.js
 ## Next
 
 1. **First real run** on a small idea (the Flock camera map), to find where the prompts and the loop break.
-2. **Usage in reports**, if the user wants it (see `QUESTIONS.md`).
-3. **Merge tasks as they finish** instead of a barrier per wave, if waves leave agents idle.
-4. **Standalone version** on the Claude Agent SDK, reusing `hub.py` and the role prompts unchanged.
+2. **Merge tasks as they finish** instead of a barrier per wave, if waves leave agents idle.
+3. **Standalone version** on the Claude Agent SDK, reusing `hub.py` and the role prompts unchanged.

@@ -1,6 +1,6 @@
 ---
 name: answer
-description: Go through an idea-builder project's questions with the user, record the answers, and start the next round. Use when the user runs /idea-builder:answer, answers questions from an idea-builder QUESTIONS.md, or wants an idea-builder project to keep going.
+description: Go through a roughcut project's questions with the user, record the answers, and start the next round. Use when the user runs /roughcut:answer, answers questions from a roughcut QUESTIONS.md, or wants a roughcut project to keep going.
 argument-hint: "[project folder]"
 ---
 
@@ -24,9 +24,9 @@ The hub command, called HUB below, is:
    - Change a guess or decision: `HUB answer <id> --text "<new choice>"`. The tasks built on it get rebuilt next round.
    - Answer a question: `HUB answer <id> --text "<answer>"`
    - Skipped questions stay open for later.
-4. Run `HUB next-round`, then `HUB status`. Say in one line how many tasks are ready, then start the round by calling the Workflow tool with the name `idea-builder:round` and these args, as a JSON object (not a string):
+4. Run `HUB next-round`, `HUB status` and `HUB usage --mark start` (no readings is fine). Say in one line how many tasks are ready, then start the round by calling the Workflow tool with the name `roughcut:round` and these args, as a JSON object (not a string):
    `{"project": "<absolute folder path>", "pluginRoot": "${CLAUDE_PLUGIN_ROOT}", "round": <the new round number>}`
    The planner adds new work from the answers, so start the round even when no tasks are ready yet.
-5. When it finishes, report the same way `/idea-builder:build` does: what got built, what needs the user, and where the detail is.
+5. When it finishes, run `HUB usage --mark end`, then report the same way `/roughcut:build` does: what got built, what needs the user, and where the detail is.
 
 If nothing is left to answer and the last round's report says the sample is complete, say so and don't start a round: the project is done for now.

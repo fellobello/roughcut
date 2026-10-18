@@ -1,0 +1,13 @@
+{
+  "affects": [],
+  "answer": null,
+  "choice": "~/.claude/roughcut/usage.json (ROUGHCUT_USAGE_FILE overrides it)",
+  "critical": false,
+  "id": "hub.16",
+  "options": [],
+  "round": 1,
+  "status": "decided",
+  "task": "hub",
+  "text": "Where are usage readings saved?",
+  "why": "Outside any project, so every project's rounds read the same file."
+}

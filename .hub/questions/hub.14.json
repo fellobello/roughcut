@@ -1,12 +1,12 @@
 {
   "affects": [],
-  "answer": null,
+  "answer": "Each module gets a separate test task, written from the spec and interfaces only",
   "choice": "Each module gets a separate test task, written from the spec and interfaces only",
   "critical": false,
   "id": "hub.14",
   "options": [],
   "round": 0,
-  "status": "decided",
+  "status": "answered",
   "task": "hub",
   "text": "How do tests avoid just confirming the code they test?",
   "why": "An agent testing its own code tends to test what it built rather than what was asked for."

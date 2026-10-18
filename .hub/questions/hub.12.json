@@ -1,12 +1,12 @@
 {
   "affects": [],
-  "answer": null,
+  "answer": "No; the verify step catches whatever breaks",
   "choice": "No; the verify step catches whatever breaks",
   "critical": false,
   "id": "hub.12",
   "options": [],
   "round": 0,
-  "status": "decided",
+  "status": "answered",
   "task": "hub",
   "text": "When a task is rebuilt, do the tasks that depend on it rebuild too?",
   "why": "Rebuilding everything downstream would cost a lot for changes that usually don't matter."

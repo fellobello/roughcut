@@ -1,4 +1,4 @@
-# Idea Builder
+# Roughcut
 
 A Claude Code plugin that turns a software idea into a working sample, a round at a time.
 
@@ -44,28 +44,43 @@ Needs Claude Code with [dynamic workflows](https://code.claude.com/docs/en/workf
 Try it from a local copy:
 
 ```bash
-claude --plugin-dir /path/to/idea-builder
+claude --plugin-dir /path/to/roughcut
 ```
 
 Or install it from GitHub, once it's published:
 
 ```bash
-claude plugin marketplace add fellobello/idea-builder
+claude plugin marketplace add fellobello/roughcut
 ```
 
 ```bash
-claude plugin install idea-builder@idea-builder
+claude plugin install roughcut@roughcut
 ```
 
 ## Use
 
 | Command | What it does |
 | --- | --- |
-| `/idea-builder:build <idea>` | Makes a project folder in the current directory and runs round 0 |
-| `/idea-builder:answer [folder]` | Goes through the questions with you, then runs the next round |
-| `/idea-builder:status [folder]` | Shows the round, what's built, and what needs you |
+| `/roughcut:build <idea>` | Makes a project folder in the current directory and runs round 0 |
+| `/roughcut:answer [folder]` | Goes through the questions with you, then runs the next round |
+| `/roughcut:status [folder]` | Shows the round, what's built, and what needs you |
 
 Each round counts toward your Claude usage. The workflow asks before it starts, and you can stop it from `/workflows`.
+
+### Usage numbers in reports (optional)
+
+Claude Code shows your 5-hour and weekly usage only to the status line, so roughcut reads them from there. To have each round's report say how much usage the round took, point your status line at the script in this repo, in `~/.claude/settings.json`:
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "python3 /path/to/roughcut/scripts/usage_statusline.py"
+  }
+}
+```
+
+It shows the model and both percentages, and saves them to `~/.claude/roughcut/usage.json`. The numbers only appear on Pro and Max plans.
 
 ## What a project looks like
 
@@ -89,9 +104,10 @@ my-idea/
 | --- | --- |
 | `workflows/round.js` | The orchestrator: one round, as a Claude Code workflow |
 | `scripts/hub.py` | The state store every agent goes through (standard library only) |
+| `scripts/usage_statusline.py` | Optional status line that saves usage numbers for the reports |
 | `agents/` | The five roles: planner, builder, tester, synthesizer, questioner |
 | `skills/` | The three commands |
-| `tests/` | Unit tests for `hub.py`: `python3 -m unittest discover -s tests` |
+| `tests/` | Unit tests for both scripts: `python3 -m unittest discover -s tests` |
 | `docs/PLAN.md` | The design, and what's planned next |
 
 Built with Claude Code.

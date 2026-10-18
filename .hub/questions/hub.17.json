@@ -1,0 +1,13 @@
+{
+  "affects": [],
+  "answer": null,
+  "choice": "By the build and answer commands, right before and right after each round",
+  "critical": false,
+  "id": "hub.17",
+  "options": [],
+  "round": 1,
+  "status": "decided",
+  "task": "hub",
+  "text": "When are usage readings taken?",
+  "why": "The status line only updates when your main session gets a reply, so readings taken inside a round would be stale."
+}

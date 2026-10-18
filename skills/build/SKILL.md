@@ -1,6 +1,6 @@
 ---
 name: build
-description: Start building a software idea with idea-builder. Creates a project folder, then runs round 0, where agents plan the idea and build as much as they can without asking anything, and hand back a short list of questions. Use when the user runs /idea-builder:build or asks idea-builder to build an idea.
+description: Start building a software idea with roughcut. Creates a project folder, then runs round 0, where agents plan the idea and build as much as they can without asking anything, and hand back a short list of questions. Use when the user runs /roughcut:build or asks roughcut to build an idea.
 argument-hint: "<the idea, or a path to a file holding it>"
 ---
 
@@ -18,12 +18,13 @@ The idea: $ARGUMENTS
    IDEA
    ```
 
-4. Run round 0 by calling the Workflow tool with the name `idea-builder:round` and these args, as a JSON object (not a string):
+4. Note the usage at the start: `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/hub.py" --project "<folder>" usage --mark start`. If it says there are no readings, carry on without them.
+   Then run round 0 by calling the Workflow tool with the name `roughcut:round` and these args, as a JSON object (not a string):
    `{"project": "<absolute folder path>", "pluginRoot": "${CLAUDE_PLUGIN_ROOT}", "round": 0}`
    The round runs in the background. Wait for it to finish.
-5. When it finishes, tell the user, briefly:
-   - what got built, from the round report;
+5. When it finishes, run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/hub.py" --project "<folder>" usage --mark end`, which adds the round's usage to its report when readings exist. Then tell the user, briefly:
+   - what got built, and how much usage it took if the report has a Usage section;
    - the big guesses to confirm and any questions that block work, from `QUESTIONS.md` in the project;
-   - that `/idea-builder:answer` goes through them and starts the next round.
+   - that `/roughcut:answer` goes through them and starts the next round.
 
    `QUESTIONS.md` and `.hub/rounds/0.md` hold the detail, so link them rather than repeating them.

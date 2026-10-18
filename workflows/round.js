@@ -1,7 +1,7 @@
 export const meta = {
   name: 'round',
-  description: 'One idea-builder round: plan, build every unblocked task in parallel, merge, test, and collect questions',
-  whenToUse: 'Started by /idea-builder:build and /idea-builder:answer with args {project, pluginRoot, round}',
+  description: 'One roughcut round: plan, build every unblocked task in parallel, merge, test, and collect questions',
+  whenToUse: 'Started by /roughcut:build and /roughcut:answer with args {project, pluginRoot, round}',
   phases: [
     { title: 'Plan', detail: 'turn the idea or the latest answers into tasks' },
     { title: 'Build', detail: 'one agent per unblocked task, merged wave by wave' },
@@ -107,7 +107,7 @@ async function buildPass(firstWave) {
       {
         label: `${task.kind}:${task.id}`,
         phase: 'Build',
-        agentType: task.kind === 'test' ? 'idea-builder:tester' : 'idea-builder:builder',
+        agentType: task.kind === 'test' ? 'roughcut:tester' : 'roughcut:builder',
         schema: RESULT_SCHEMA,
       },
     )))
@@ -115,7 +115,7 @@ async function buildPass(firstWave) {
     await agent(context(`Wave ${wave} tasks: ${ids.join(', ')}`), {
       label: `merge:wave-${wave}`,
       phase: 'Build',
-      agentType: 'idea-builder:synthesizer',
+      agentType: 'roughcut:synthesizer',
       schema: MERGE_SCHEMA,
     })
   }
@@ -126,7 +126,7 @@ phase('Plan')
 const plan = await agent(context(), {
   label: `plan:round-${round}`,
   phase: 'Plan',
-  agentType: 'idea-builder:planner',
+  agentType: 'roughcut:planner',
   schema: PLAN_SCHEMA,
 })
 if (!plan) throw new Error('the planner stopped before finishing, so nothing was built')
@@ -142,7 +142,7 @@ if (plan.todo > 0) {
     const check = await agent(context('Job: verify the merged code.'), {
       label: `verify:${fix + 1}`,
       phase: 'Verify',
-      agentType: 'idea-builder:tester',
+      agentType: 'roughcut:tester',
       schema: VERIFY_SCHEMA,
     })
     if (check) checks.push(check)
@@ -157,7 +157,7 @@ phase('Questions')
 const report = await agent(context(), {
   label: 'questions',
   phase: 'Questions',
-  agentType: 'idea-builder:questioner',
+  agentType: 'roughcut:questioner',
   schema: REPORT_SCHEMA,
 })
 

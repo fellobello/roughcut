@@ -1,6 +1,6 @@
 {
   "affects": [],
-  "answer": null,
+  "answer": "A new folder under the current directory (for you, ~/Desktop/CODE)",
   "choice": "A new folder under the current directory (for you, ~/Desktop/CODE)",
   "critical": true,
   "id": "hub.5",
@@ -8,7 +8,7 @@
     "One fixed folder, set in the plugin's settings"
   ],
   "round": 0,
-  "status": "decided",
+  "status": "answered",
   "task": "hub",
   "text": "Where do new projects go?",
   "why": "No setup, and you choose the place by where you start Claude."

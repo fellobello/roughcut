@@ -1,12 +1,12 @@
 {
-  "name": "idea-builder",
-  "description": "Idea Builder: turn a software idea into a working sample with parallel agents",
+  "name": "roughcut",
+  "description": "Roughcut: turn a software idea into a working sample with parallel agents",
   "owner": {
     "name": "Steven Cochrane"
   },
   "plugins": [
     {
-      "name": "idea-builder",
+      "name": "roughcut",
       "source": "./",
       "description": "Turn a software idea into a working sample, one round of building and questions at a time."
     }

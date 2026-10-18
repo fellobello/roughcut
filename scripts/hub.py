@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Shared state for idea-builder rounds.
+"""Shared state for roughcut rounds.
 
 Agents never edit .hub/ by hand. They call this script, which keeps one JSON
 file per task and per question and takes a lock for every change, so agents
@@ -27,6 +27,7 @@ TASK_KINDS = ("build", "test")
 FINISH_STATUSES = ("done", "blocked", "failed")
 DEFAULT_MAX_ATTEMPTS = 3  # the first try plus two retries
 HUB_OWNER = "hub"  # owner of questions that come from the planner or questioner, not a task
+USAGE_WINDOWS = (("five_hour", "5-hour window"), ("seven_day", "Week"))
 
 
 class HubError(Exception):
@@ -41,6 +42,11 @@ def check_task_id(value, what="task id"):
 
 def split_ids(value):
     return [part.strip() for part in (value or "").split(",") if part.strip()]
+
+
+def usage_file():
+    """Where scripts/usage_statusline.py saves the latest usage reading."""
+    return Path(os.environ.get("ROUGHCUT_USAGE_FILE") or Path.home() / ".claude" / "roughcut" / "usage.json")
 
 
 class Hub:
@@ -451,7 +457,7 @@ class Hub:
             "# Questions",
             "",
             f"_Round {current}. Generated from `.hub/questions/` by `hub.py render`, so don't edit it by hand. "
-            "Answer in Claude Code with `/idea-builder:answer`._",
+            "Answer in Claude Code with `/roughcut:answer`._",
             "",
             f"## Big guesses to confirm ({len(guesses)})",
             "",
@@ -495,7 +501,13 @@ class Hub:
         }
 
     def report(self, notes=""):
+        """Write .hub/rounds/<round>.md. Notes are kept, so a later call without notes reuses them."""
         current = self.config()["round"]
+        notes_path = self.rounds_dir / f"{current}.notes.md"
+        if notes.strip():
+            self._write_text(notes_path, notes.strip() + "\n")
+        elif notes_path.exists():
+            notes = notes_path.read_text(encoding="utf-8")
 
         def cell(value):
             return str(value or "").replace("|", "\\|").replace("\n", " ")
@@ -519,9 +531,62 @@ class Hub:
             f"- Tasks ready for the next round: {len(state['ready'])}",
             "",
         ]
+        out += self._usage_lines(current)
         path = self.rounds_dir / f"{current}.md"
         self._write_text(path, "\n".join(out))
         return {"path": str(path)}
+
+    # Usage
+
+    def latest_usage(self):
+        source = usage_file()
+        if not source.exists():
+            return {
+                "available": False,
+                "reason": f"no usage readings at {source}; the README's usage section says how to turn them on",
+            }
+        return {"available": True, "reading": self._read(source)}
+
+    def mark_usage(self, when):
+        """Save the latest usage reading as this round's start or end. No readings isn't an error."""
+        if when not in ("start", "end"):
+            raise HubError("mark the usage at the round's start or end")
+        latest = self.latest_usage()
+        if not latest["available"]:
+            return latest
+        with self.locked():
+            current = self.config()["round"]
+            path = self.rounds_dir / f"{current}.usage.json"
+            marks = self._read(path) if path.exists() else {}
+            marks[when] = latest["reading"]
+            self._write(path, marks)
+        if when == "end" and (self.rounds_dir / f"{current}.md").exists():
+            self.report()  # add the usage section to the report the questioner wrote
+        return {"available": True, "round": current, when: latest["reading"]}
+
+    def _usage_lines(self, current):
+        path = self.rounds_dir / f"{current}.usage.json"
+        marks = self._read(path) if path.exists() else {}
+        if "start" not in marks or "end" not in marks:
+            return []
+        lines = []
+        for key, label in USAGE_WINDOWS:
+            start = (marks["start"].get("rate_limits") or {}).get(key)
+            end = (marks["end"].get("rate_limits") or {}).get(key)
+            if not start or not end:
+                continue
+            before, after = start["used_percentage"], end["used_percentage"]
+            if start.get("resets_at") != end.get("resets_at"):
+                lines.append(f"- {label}: {before:.0f}% at the start; it reset during the round and is now {after:.0f}%")
+            else:
+                lines.append(f"- {label}: {before:.0f}% → {after:.0f}% (+{after - before:.0f} points)")
+        if not lines:
+            return []
+        return ["## Usage", ""] + lines + [
+            "",
+            "_Read from your status line, so it's approximate and includes anything else you did in Claude meanwhile._",
+            "",
+        ]
 
 
 def build_parser():
@@ -581,6 +646,8 @@ def build_parser():
     sub.add_parser("render", help="write QUESTIONS.md")
     p = sub.add_parser("report", help="write .hub/rounds/<round>.md")
     p.add_argument("--notes", default="")
+    p = sub.add_parser("usage", help="show the latest usage reading, or save it as the round's start or end")
+    p.add_argument("--mark", choices=("start", "end"))
     sub.add_parser("status", help="summarize tasks and questions")
     sub.add_parser("next-round", help="move to the next round")
     return parser
@@ -628,6 +695,8 @@ def run(hub, args):
         return hub.render()
     if command == "report":
         return hub.report(args.notes)
+    if command == "usage":
+        return hub.mark_usage(args.mark) if args.mark else hub.latest_usage()
     if command == "status":
         return hub.status()
     if command == "next-round":

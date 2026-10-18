@@ -1,6 +1,6 @@
 {
   "affects": [],
-  "answer": null,
+  "answer": "hub.py, branching from the project's current HEAD",
   "choice": "hub.py, branching from the project's current HEAD",
   "critical": true,
   "id": "hub.4",
@@ -8,7 +8,7 @@
     "Claude Code's isolation: 'worktree' plus the worktree.baseRef = head setting"
   ],
   "round": 0,
-  "status": "decided",
+  "status": "answered",
   "task": "hub",
   "text": "Who creates the worktrees?",
   "why": "Claude Code's own worktree option branches from the remote default branch, so once a project has a remote, wave 2 wouldn't see wave 1's merged code."

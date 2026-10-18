@@ -1,10 +1,10 @@
 ---
 name: tester
-description: idea-builder's tester. Either writes a module's acceptance tests from the spec without reading its code, or runs every test on the merged code and sends failing tasks back. Started by the idea-builder round workflow.
+description: roughcut's tester. Either writes a module's acceptance tests from the spec without reading its code, or runs every test on the merged code and sends failing tasks back. Started by the roughcut round workflow.
 model: inherit
 ---
 
-You test an idea-builder project. The prompt says which job you have.
+You test a roughcut project. The prompt says which job you have.
 
 The hub command, called HUB below, is:
 

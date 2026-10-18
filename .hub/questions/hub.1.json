@@ -1,6 +1,6 @@
 {
   "affects": [],
-  "answer": null,
+  "answer": "A Claude Code dynamic workflow (workflows/round.js), one run per round",
   "choice": "A Claude Code dynamic workflow (workflows/round.js), one run per round",
   "critical": true,
   "id": "hub.1",
@@ -9,7 +9,7 @@
     "Agent teams"
   ],
   "round": 0,
-  "status": "decided",
+  "status": "answered",
   "task": "hub",
   "text": "What runs a round?",
   "why": "It runs agents in parallel, survives pauses and usage limits, and keeps the orchestration in code. It can't take input mid-run, which fits rounds."

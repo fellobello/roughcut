@@ -1,6 +1,6 @@
 {
   "affects": [],
-  "answer": null,
+  "answer": "They started from similar ideas and grew to overlap. Take notes and ideas from the Oct 5 note, but don't be bound by it.",
   "choice": null,
   "critical": true,
   "id": "hub.9",
@@ -9,7 +9,7 @@
     "Separate projects"
   ],
   "round": 0,
-  "status": "open",
+  "status": "answered",
   "task": "hub",
   "text": "Is this the same project as your 2026-10-05 note on a design-first AI dev tool (CODE/AI-system-design-tool-idea.txt)?",
   "why": "That note wants a structured spec, decisions with reasons, and links from code back to requirements. This tool already has the first two. The big difference: it builds before asking."

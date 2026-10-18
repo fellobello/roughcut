@@ -1,12 +1,12 @@
 {
   "affects": [],
-  "answer": null,
-  "choice": "In chat, through /idea-builder:answer. QUESTIONS.md is generated, not edited.",
+  "answer": "In chat, through /roughcut:answer. QUESTIONS.md is generated, not edited.",
+  "choice": "In chat, through /roughcut:answer. QUESTIONS.md is generated, not edited.",
   "critical": false,
   "id": "hub.13",
   "options": [],
   "round": 0,
-  "status": "decided",
+  "status": "answered",
   "task": "hub",
   "text": "Where are questions answered?",
   "why": "One place to answer, and hub.py stays the only writer of the state."

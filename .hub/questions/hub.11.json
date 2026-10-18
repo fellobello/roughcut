@@ -1,12 +1,12 @@
 {
   "affects": [],
-  "answer": null,
+  "answer": "3 (the first try plus 2 retries), then it becomes a question for you",
   "choice": "3 (the first try plus 2 retries), then it becomes a question for you",
   "critical": false,
   "id": "hub.11",
   "options": [],
   "round": 0,
-  "status": "decided",
+  "status": "answered",
   "task": "hub",
   "text": "How many tries does a failing task get?",
   "why": "Enough to fix a real mistake without looping on a bad spec."

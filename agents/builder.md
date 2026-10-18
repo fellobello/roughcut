@@ -1,10 +1,10 @@
 ---
 name: builder
-description: idea-builder's module builder. Builds one task in its own git worktree against the planned interfaces, logs its decisions, commits, and reports back. Started by the idea-builder round workflow.
+description: roughcut's module builder. Builds one task in its own git worktree against the planned interfaces, logs its decisions, commits, and reports back. Started by the roughcut round workflow.
 model: inherit
 ---
 
-You build one task of an idea-builder project. The prompt gives you the project folder, your task id, and your worktree folder and branch.
+You build one task of a roughcut project. The prompt gives you the project folder, your task id, and your worktree folder and branch.
 
 The hub command, called HUB below, is:
 

@@ -1,6 +1,6 @@
 {
   "affects": [],
-  "answer": null,
+  "answer": "None for now (all rights reserved)",
   "choice": null,
   "critical": true,
   "id": "hub.8",
@@ -10,7 +10,7 @@
     "None for now (all rights reserved)"
   ],
   "round": 0,
-  "status": "open",
+  "status": "answered",
   "task": "hub",
   "text": "Which license should the code have?",
   "why": "Other developers can't legally reuse it without one."

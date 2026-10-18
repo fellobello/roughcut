@@ -1,9 +1,11 @@
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 sys.path.insert(0, str(SCRIPTS))
@@ -273,6 +275,89 @@ class OutputTest(HubTest):
     def test_next_round(self):
         self.assertEqual(self.hub.next_round(), {"round": 1})
         self.assertEqual(self.hub.ask("hub", "q", choice="c")["round"], 1)
+
+
+def reading(five_hour, week, five_hour_resets=1000, week_resets=9000):
+    return {
+        "rate_limits": {
+            "five_hour": {"used_percentage": five_hour, "resets_at": five_hour_resets},
+            "seven_day": {"used_percentage": week, "resets_at": week_resets},
+        },
+        "seen_at": 1,
+    }
+
+
+class UsageTest(HubTest):
+    def setUp(self):
+        super().setUp()
+        self.usage = Path(self._tmp.name) / "usage.json"
+        env = mock.patch.dict(os.environ, {"ROUGHCUT_USAGE_FILE": str(self.usage)})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def test_no_readings_is_not_an_error(self):
+        result = self.hub.mark_usage("start")
+        self.assertFalse(result["available"])
+        self.assertIn("README", result["reason"])
+
+    def test_report_shows_usage_for_the_round(self):
+        self.usage.write_text(json.dumps(reading(23, 41)))
+        self.hub.mark_usage("start")
+        self.hub.report("Built the map.")
+        self.usage.write_text(json.dumps(reading(31.4, 44)))
+        self.hub.mark_usage("end")
+        text = (self.project / ".hub" / "rounds" / "0.md").read_text()
+        self.assertIn("Built the map.", text)  # the questioner's notes survive the refresh
+        self.assertIn("- 5-hour window: 23% → 31% (+8 points)", text)
+        self.assertIn("- Week: 41% → 44% (+3 points)", text)
+
+    def test_report_notices_a_reset(self):
+        self.usage.write_text(json.dumps(reading(90, 50)))
+        self.hub.mark_usage("start")
+        self.usage.write_text(json.dumps(reading(5, 52, five_hour_resets=2000)))
+        self.hub.mark_usage("end")
+        text = Path(self.hub.report()["path"]).read_text()
+        self.assertIn("5-hour window: 90% at the start; it reset during the round and is now 5%", text)
+
+    def test_report_skips_usage_without_both_marks(self):
+        self.usage.write_text(json.dumps(reading(23, 41)))
+        self.hub.mark_usage("start")
+        self.assertNotIn("## Usage", Path(self.hub.report()["path"]).read_text())
+
+
+class StatusLineTest(unittest.TestCase):
+    def run_status_line(self, session, usage):
+        return subprocess.run(
+            [sys.executable, str(SCRIPTS / "usage_statusline.py")],
+            input=json.dumps(session), capture_output=True, text=True,
+            env={**os.environ, "ROUGHCUT_USAGE_FILE": str(usage)},
+        )
+
+    def test_saves_limits_and_prints_them(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            usage = Path(tmp) / "nested" / "usage.json"
+            session = {"model": {"display_name": "Opus"}, "session_id": "s1", **reading(23.5, 41.2)}
+            result = self.run_status_line(session, usage)
+            self.assertEqual(result.stdout.strip(), "[Opus] 5h 24% · week 41%")
+            saved = json.loads(usage.read_text())
+            self.assertEqual(saved["rate_limits"]["seven_day"]["used_percentage"], 41.2)
+            self.assertEqual(saved["session_id"], "s1")
+
+    def test_without_limits_keeps_the_old_reading(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            usage = Path(tmp) / "usage.json"
+            usage.write_text("old")
+            result = self.run_status_line({"model": {"display_name": "Opus"}}, usage)
+            self.assertEqual(result.stdout.strip(), "[Opus]")
+            self.assertEqual(usage.read_text(), "old")
+
+    def test_bad_input_prints_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result = subprocess.run(
+                [sys.executable, str(SCRIPTS / "usage_statusline.py")], input="not json",
+                capture_output=True, text=True, env={**os.environ, "ROUGHCUT_USAGE_FILE": str(Path(tmp) / "u.json")},
+            )
+            self.assertEqual((result.returncode, result.stdout), (0, ""))
 
 
 class CliTest(HubTest):

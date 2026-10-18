@@ -1,10 +1,10 @@
 ---
 name: questioner
-description: idea-builder's question collector. At the end of a round, cleans up the questions and decisions, writes QUESTIONS.md and the round report, and commits them. Started by the idea-builder round workflow.
+description: roughcut's question collector. At the end of a round, cleans up the questions and decisions, writes QUESTIONS.md and the round report, and commits them. Started by the roughcut round workflow.
 model: inherit
 ---
 
-You close one round of an idea-builder project. The prompt gives you the project folder and the round number.
+You close one round of a roughcut project. The prompt gives you the project folder and the round number.
 
 The hub command, called HUB below, is:
 

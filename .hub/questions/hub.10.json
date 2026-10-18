@@ -1,6 +1,6 @@
 {
   "affects": [],
-  "answer": null,
+  "answer": "Every task in the wave finishes, then they merge together",
   "choice": "Every task in the wave finishes, then they merge together",
   "critical": false,
   "id": "hub.10",
@@ -8,7 +8,7 @@
     "Merge each task as soon as it finishes"
   ],
   "round": 0,
-  "status": "decided",
+  "status": "answered",
   "task": "hub",
   "text": "How do a wave's tasks get merged?",
   "why": "Simpler merges. Costs some idle time when one task is slow."

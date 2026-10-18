@@ -1,6 +1,6 @@
 {
   "affects": [],
-  "answer": null,
+  "answer": "Yes, via the status line",
   "choice": "Not yet",
   "critical": true,
   "id": "hub.6",
@@ -8,7 +8,7 @@
     "Yes: add the status line piece (changes your Claude Code settings)"
   ],
   "round": 0,
-  "status": "decided",
+  "status": "answered",
   "task": "hub",
   "text": "Should round reports show how much usage the round took?",
   "why": "Claude Code gives the 5-hour and weekly usage percentages only to the status line, and a plugin can't set your status line. It would take a line added to your status line settings that saves the numbers to a file."

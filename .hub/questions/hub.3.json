@@ -1,6 +1,6 @@
 {
   "affects": [],
-  "answer": null,
+  "answer": "JSON files in <project>/.hub/, committed with the code",
   "choice": "JSON files in <project>/.hub/, committed with the code",
   "critical": true,
   "id": "hub.3",
@@ -9,7 +9,7 @@
     "Outside the repo"
   ],
   "round": 0,
-  "status": "decided",
+  "status": "answered",
   "task": "hub",
   "text": "Where does a project's state live?",
   "why": "Agents trade files instead of waiting on each other, git history shows every decision, and the standalone version can reuse it as is."

@@ -1,12 +1,12 @@
 {
   "affects": [],
-  "answer": null,
+  "answer": "main",
   "choice": "main",
   "critical": false,
   "id": "hub.15",
   "options": [],
   "round": 0,
-  "status": "decided",
+  "status": "answered",
   "task": "hub",
   "text": "What's the default branch called?",
   "why": "The current convention."
