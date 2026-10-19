@@ -4,7 +4,11 @@ A Claude Code plugin that turns a software idea into a working sample, a round a
 
 You give it an idea in a sentence or two, the way you'd write it in a notebook. Agents plan it, build the modules in parallel, merge and test them, and then stop with a short list of questions. You answer, and the next round builds on your answers. You decide when it's done.
 
-> Status: round 0. The pieces are built and unit-tested, but the full loop hasn't run on a real idea yet.
+> Status: early. It has run one full round on a real idea; see the example below.
+
+## Example
+
+[alpr-route-planner](https://github.com/fellobello/alpr-route-planner) came from one line: "google maps but you can see flock cameras and plan routes around them." Roughcut's first round planned it as 6 modules, built them with acceptance tests in parallel, and merged them into a working web app with 591 passing tests, then handed back 11 big guesses to confirm. Its `.hub/` folder holds the whole plan, every task and every decision.
 
 ## How a round works
 
@@ -47,7 +51,7 @@ Try it from a local copy:
 claude --plugin-dir /path/to/roughcut
 ```
 
-Or install it from GitHub, once it's published:
+Or install it from GitHub:
 
 ```bash
 claude plugin marketplace add fellobello/roughcut
