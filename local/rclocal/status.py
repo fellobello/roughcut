@@ -15,6 +15,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from .llm import LLMError
+from .runner import Runner
 
 
 def _run(cmd):
@@ -107,6 +108,10 @@ def snapshot(hub, client):
         "models": per_model,
         "events": [e for e in in_round if e["type"] not in ("llm_start",)][-40:],
         "resources": resources(client),
+        "box": {
+            "sandbox": Runner(hub.project, hub.stack, sandbox=hub.local_config()["sandbox"]).sandbox,
+            "guarded": sum(e["type"] == "blocked_code" for e in in_round),
+        },
     }
 
 
@@ -135,6 +140,7 @@ code,.mono{font-family:ui-monospace,Menlo,monospace;font-size:12.5px}.log{max-he
  <div class="card"><h2>CPU load</h2><div class="big" id="load">-</div><div class="sub" id="ocpu"></div></div>
  <div class="card"><h2>Loaded models</h2><div id="loaded" class="mono">-</div></div>
  <div class="card"><h2>Questions</h2><div class="big" id="qs">-</div><div class="sub">open · guesses to confirm</div></div>
+ <div class="card"><h2>Safety box</h2><div class="big" id="box">-</div><div class="sub" id="boxsub"></div></div>
 </div>
 <div class="card" style="margin-bottom:12px"><h2>Running now</h2><div id="active" class="mono muted">Nothing.</div></div>
 <div class="card" style="margin-bottom:12px"><h2>Tasks</h2><div class="wrap"><table><thead><tr><th>File</th><th>Job</th><th>Status</th><th>Tries</th><th>Summary</th></tr></thead><tbody id="tasks"></tbody></table></div></div>
@@ -144,13 +150,14 @@ code,.mono{font-family:ui-monospace,Menlo,monospace;font-size:12.5px}.log{max-he
 </div>
 </main><script>
 const gb=b=>(b/2**30).toFixed(1)+' GB', esc=s=>String(s??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
-function line(e){const t=new Date(e.ts*1000).toLocaleTimeString();const f={phase:`phase: ${e.name}`,task_start:`start ${e.task} (try ${e.attempt})`,task_end:`${e.task}: ${e.status}. ${e.summary}`,llm_end:`${e.role} ${e.model} ${e.label}: ${e.seconds}s, ${e.tokens_per_second} tok/s`,llm_error:`${e.role} ${e.label} failed: ${e.error}`,tests:`tests ${e.target}: ${e.passed?'pass':'fail'} (${e.seconds}s)`,contract:`contract ${e.path} v${e.version}: ${e.reason}`,question:`${e.blocking?'question':'decision'} ${e.id}: ${e.text}`,note:e.text,round_start:'round started',round_end:'round finished'}[e.type]||e.type;return `<div><span class="muted">${t}</span> ${esc(f)}</div>`}
+function line(e){const t=new Date(e.ts*1000).toLocaleTimeString();const f={phase:`phase: ${e.name}`,task_start:`start ${e.task} (try ${e.attempt})`,task_end:`${e.task}: ${e.status}. ${e.summary}`,llm_end:`${e.role} ${e.model} ${e.label}: ${e.seconds}s, ${e.tokens_per_second} tok/s`,llm_error:`${e.role} ${e.label} failed: ${e.error}`,tests:`tests ${e.target}: ${e.passed?'pass':'fail'} (${e.seconds}s)`,contract:`contract ${e.path} v${e.version}: ${e.reason}`,question:`${e.blocking?'question':'decision'} ${e.id}: ${e.text}`,agent_step:`${e.task} step ${e.step}: ${e.action} ${e.path}`,blocked_code:`guard blocked ${e.path}: ${e.problems}`,note:e.text,round_start:'round started',round_end:'round finished'}[e.type]||e.type;return `<div><span class="muted">${t}</span> ${esc(f)}</div>`}
 async function tick(){try{const s=await (await fetch('api/state')).json();
 document.getElementById('title').textContent=s.project;
 document.getElementById('where').textContent=`Round ${s.round} · ${s.running?('running: '+(s.phase||'starting')):(s.phase||'idle')}`+(s.running&&s.started?` · ${Math.round((s.now-s.started)/60)} min`:'');
 const r=s.resources,m=r.memory;if(m){document.getElementById('mem').textContent=`${gb(m.used)} / ${gb(m.total)}`;document.getElementById('membar').style.width=(100*m.used/m.total).toFixed(0)+'%'}
 document.getElementById('load').textContent=`${r.load[0]} / ${r.cores} cores`;document.getElementById('ocpu').textContent=r.ollama.up?`Ollama: ${r.ollama.cpu}% CPU, ${gb(r.ollama.rss)} RAM`:'Ollama is not running';
 document.getElementById('loaded').innerHTML=r.ollama.loaded.length?r.ollama.loaded.map(x=>`${esc(x.name)} <span class="muted">${gb(x.size)}</span>`).join('<br>'):'<span class="muted">none</span>';
+document.getElementById('box').textContent=s.box.sandbox?'Sandboxed':'Limits only';document.getElementById('boxsub').textContent=`no internet · project-only files · ${s.box.guarded} blocked this round`;
 document.getElementById('qs').textContent=`${s.questions.open} · ${s.questions.guesses}`;
 document.getElementById('active').innerHTML=s.active.length?s.active.map(a=>`${esc(a.role)} · ${esc(a.model)} · ${esc(a.label)} · ${a.elapsed}s`).join('<br>'):'Nothing.';
 document.getElementById('tasks').innerHTML=s.tasks.map(t=>`<tr><td class="mono">${esc(t.module)}</td><td>${t.kind==='test'?'tests':'code'}</td><td><span class="chip ${t.status}">${t.status.replace('_',' ')}</span></td><td>${t.attempts}</td><td>${esc(t.summary)}</td></tr>`).join('')||'<tr><td colspan="5" class="muted">No tasks yet.</td></tr>';

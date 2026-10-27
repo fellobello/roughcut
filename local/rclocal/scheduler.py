@@ -32,8 +32,8 @@ class Scheduler:
             self._per_model[model] = asyncio.Semaphore(self._slots.get(model, 1))
         return self._per_model[model]
 
-    async def ask(self, role, system, user, label, reply=None):
-        """One call on the role's model.
+    async def ask(self, role, messages, label, reply=None):
+        """One call on the role's model, given the conversation so far.
 
         With `reply` (a key of protocol.REPLIES), returns that schema's data. Without it,
         returns (code text, cut_off) for a code reply.
@@ -46,11 +46,11 @@ class Scheduler:
             try:
                 if reply:
                     result, stats = await asyncio.to_thread(
-                        self.llm.chat_json, model, system, user, REPLIES[reply], self.think.get(role), limit
+                        self.llm.chat_json, model, messages, REPLIES[reply], self.think.get(role), limit
                     )
                 else:
                     text, stats = await asyncio.to_thread(
-                        self.llm.chat_text, model, system, user, self.think.get(role), limit, CODE_STOP
+                        self.llm.chat_text, model, messages, self.think.get(role), limit, CODE_STOP
                     )
                     result = (text, stats.cut_off)
             except LLMError as e:

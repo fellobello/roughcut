@@ -77,11 +77,27 @@ BLAMES = ("code", "test", "contract")
 REVIEW = _obj(["blame", "reason"], blame={"type": "string", "enum": list(BLAMES)}, reason=STR)
 REPORT = _obj(["notes"], notes=STR)
 
+# One step of a builder agent: which action to take next. Code never goes in a step:
+# "write" makes the round ask for the file in a separate code reply.
+ACTIONS = {
+    "read": "read a project file you may see (path)",
+    "write": "write your file; the next message asks you for its full text (path = your file)",
+    "test": "run your file's tests in the sandbox",
+    "finish": "stop because your tests pass (note = one-sentence summary)",
+    "ask": "stop and ask the user, only when the contract can't work (note = the question)",
+}
+STEP = _obj(
+    ["action", "path", "note"],
+    action={"type": "string", "enum": list(ACTIONS)},
+    path=STR,
+    note=STR,
+)
+
 # Data replies by call kind. "notes" runs on the builder's model.
-REPLIES = {"planner": PLAN, "notes": NOTES, "reviewer": REVIEW, "reporter": REPORT}
-CODE_ROLES = ("tester", "builder")
+REPLIES = {"planner": PLAN, "step": STEP, "notes": NOTES, "reviewer": REVIEW, "reporter": REPORT}
+CODE_ROLES = ("tester", "builder", "designer")
 CODE_STOP = "\n```"  # the closing fence of a code reply
-ROLES = ("planner", "tester", "builder", "reviewer", "reporter")  # each picks a model in local.json
+ROLES = ("planner", "tester", "builder", "designer", "reviewer", "reporter")  # each picks a model in local.json
 
 # Events: type -> fields every event of that type carries. Every event also has "ts" and "round".
 EVENTS = {
@@ -95,7 +111,9 @@ EVENTS = {
         "call", "role", "model", "label", "seconds", "prompt_tokens", "output_tokens", "tokens_per_second", "cut_off",
     ),
     "llm_error": ("call", "role", "model", "label", "error"),
+    "agent_step": ("task", "step", "action", "path", "note"),
     "tests": ("target", "passed", "seconds"),
+    "blocked_code": ("task", "path", "problems"),
     "contract": ("path", "version", "reason"),
     "question": ("id", "text", "blocking"),
     "note": ("text",),

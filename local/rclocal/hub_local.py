@@ -19,6 +19,7 @@ from hub import HUB_OWNER, Hub, HubError  # noqa: E402
 from .contracts import Contracts  # noqa: E402
 from .events import Events  # noqa: E402
 from .memory import Memory  # noqa: E402
+from .stacks import stack_for  # noqa: E402
 
 __all__ = ["HUB_OWNER", "HubError", "LocalHub", "DEFAULT_CONFIG"]
 
@@ -26,11 +27,13 @@ __all__ = ["HUB_OWNER", "HubError", "LocalHub", "DEFAULT_CONFIG"]
 # models that fail native tool calling (the qwen coders) still work here. Two models
 # fit in memory together; a third would make Ollama swap them in and out.
 DEFAULT_CONFIG = {
+    "stack": "web",  # web: a browser app with a designed page; python: standard-library Python
     "host": "http://127.0.0.1:11434",
     "models": {
         "planner": "qwen3:8b",
         "tester": "qwen2.5-coder:7b",
         "builder": "qwen2.5-coder:7b",
+        "designer": "qwen2.5-coder:7b",
         "reviewer": "qwen3:8b",
         "reporter": "qwen3:8b",
     },
@@ -38,10 +41,14 @@ DEFAULT_CONFIG = {
     "max_parallel_calls": 2,  # model calls in flight at once, across all models
     "model_slots": {},  # per-model limit, e.g. {"qwen3:8b": 1}; default 1 each
     "max_parallel_tasks": 3,  # tasks per wave
-    "fix_tries": 3,  # write-and-test tries per build task before a review
+    "agent_steps": 10,  # actions a builder agent may take per attempt
+    "design_tries": 3,  # page attempts before the design task gives up
     # Longest reply per call kind, in tokens. A model that loses track stops here instead of
     # writing until the call times out.
-    "max_tokens": {"planner": 3000, "tester": 2500, "builder": 3500, "notes": 800, "reviewer": 600, "reporter": 600},
+    "max_tokens": {
+        "planner": 3000, "tester": 2500, "builder": 3500, "designer": 4000,
+        "step": 300, "notes": 800, "reviewer": 600, "reporter": 600,
+    },
     "call_timeout": 900,  # seconds per model call
     "num_ctx": 8192,
     "temperature": 0.2,
@@ -61,18 +68,25 @@ class LocalHub(Hub):
         self.events = Events(self.root / "events.jsonl")
 
     def init(self, idea, config=None):
-        result = super().init(idea)
         cfg = copy.deepcopy(DEFAULT_CONFIG)
         for key, value in (config or {}).items():
             if isinstance(value, dict) and isinstance(cfg.get(key), dict):
                 cfg[key].update(value)
             else:
                 cfg[key] = value
+        stack = stack_for(cfg["stack"])
+        result = super().init(idea)
         self._write(self.root / "local.json", cfg)
         self.contracts.dir.mkdir(parents=True, exist_ok=True)
         self.memory.init()
-        self._ignore(".hub/events.jsonl", "__pycache__/")
-        return result
+        for name, text in stack.scaffold(self.project).items():
+            self._write_text(self.project / name, text)
+        self._ignore(".hub/events.jsonl", "__pycache__/", "node_modules/")
+        return {**result, "stack": stack.name}
+
+    @property
+    def stack(self):
+        return stack_for(self.local_config()["stack"])
 
     def local_config(self):
         path = self.root / "local.json"

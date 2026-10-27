@@ -8,14 +8,9 @@ builder's prompt so later files avoid the same mistake.
 
 from __future__ import annotations
 
-# The harness runs Python tests, so the sample is Python with the standard library only.
-DEFAULT_CONVENTIONS = [
-    "Python 3.9 or later, standard library only. No pip packages.",
-    "Code lives in the app/ package. Import other project files as `from app.geo import distance`.",
-    "Tests use unittest, live in tests/, and import the code the same way.",
-    "No network access and no files outside the project folder, in code or tests.",
-    "Type hints on every public function, and a one-line docstring.",
-    "Keep each file under about 200 lines.",
+# Every stack: the safety rules, as conventions too. The stack adds its own (stacks.py).
+SAFETY_CONVENTIONS = [
+    "No network access, no new processes, no files outside the project folder, in code or tests.",
 ]
 
 
@@ -40,7 +35,7 @@ class Memory:
         """Write the defaults plus the planner's own conventions, keeping any already there."""
         have = [line[2:] for line in self.conventions().splitlines() if line.startswith("- ")]
         rules = []
-        for rule in DEFAULT_CONVENTIONS + have + [e.strip() for e in extra]:
+        for rule in self.hub.stack.conventions + SAFETY_CONVENTIONS + have + [e.strip() for e in extra]:
             if rule and rule not in rules:
                 rules.append(rule)
         self.hub._write_text(self.conventions_path, "# Conventions\n\n" + "".join(f"- {r}\n" for r in rules))

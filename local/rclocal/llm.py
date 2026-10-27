@@ -87,9 +87,9 @@ class OllamaClient:
         stats.cut_off = resp.get("done_reason") == "length"
         return (resp.get("message") or {}).get("content", "")
 
-    def chat_json(self, model, system, user, schema, think=None, max_tokens=None):
-        """Return (reply, Stats). Raises LLMError."""
-        messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    def chat_json(self, model, messages, schema, think=None, max_tokens=None):
+        """Return (reply, Stats) for a conversation. Raises LLMError."""
+        messages = list(messages)
         stats = Stats()
         for attempt in (1, 2):
             content = self._chat(model, messages, stats, think, max_tokens, format=schema)
@@ -105,9 +105,8 @@ class OllamaClient:
                     {"role": "user", "content": f"That reply was not valid ({e}). Reply again with only JSON matching the schema."},
                 ]
 
-    def chat_text(self, model, system, user, think=None, max_tokens=None, stop=None):
+    def chat_text(self, model, messages, think=None, max_tokens=None, stop=None):
         """Return (text, Stats). Check stats.cut_off: a cut-off file is incomplete."""
-        messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
         stats = Stats()
         extra = {"stop": [stop]} if stop else {}
         return self._chat(model, messages, stats, think, max_tokens, **extra), stats
@@ -123,8 +122,8 @@ class OllamaClient:
 class FakeLLM:
     """Answers with respond(role, model, system, user, schema) -> dict or str. For tests.
 
-    The role is the system prompt's first word ("Builder: ..." -> "builder"); schema is
-    None for code replies.
+    The role is the system prompt's first word ("Builder: ..." -> "builder"), user is the
+    conversation's latest user message, and schema is None for code replies.
     """
 
     def __init__(self, respond, seconds=0.0):
@@ -132,18 +131,20 @@ class FakeLLM:
         self.seconds = seconds
         self.calls = []
 
-    def _answer(self, model, system, user, schema):
-        self.calls.append({"model": model, "system": system, "user": user})
+    def _answer(self, model, messages, schema):
+        system = messages[0]["content"]
+        user = next(m["content"] for m in reversed(messages) if m["role"] == "user")
+        self.calls.append({"model": model, "system": system, "user": user, "messages": list(messages)})
         role = system.split(":", 1)[0].strip().lower()
         if self.seconds:
             time.sleep(self.seconds)
         return self.respond(role, model, system, user, schema)
 
-    def chat_json(self, model, system, user, schema, think=None, max_tokens=None):
-        return validate(self._answer(model, system, user, schema), schema), Stats(self.seconds, 10, 10)
+    def chat_json(self, model, messages, schema, think=None, max_tokens=None):
+        return validate(self._answer(model, messages, schema), schema), Stats(self.seconds, 10, 10)
 
-    def chat_text(self, model, system, user, think=None, max_tokens=None, stop=None):
-        text = self._answer(model, system, user, None)
+    def chat_text(self, model, messages, think=None, max_tokens=None, stop=None):
+        text = self._answer(model, messages, None)
         if stop and stop in text:
             text = text[: text.index(stop)]  # like Ollama, leave the stop sequence out
         return text, Stats(self.seconds, 10, 10)

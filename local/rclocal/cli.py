@@ -19,6 +19,8 @@ from .hub_local import HubError, LocalHub
 from .llm import LLMError, OllamaClient
 from .protocol import ROLES
 from .rounds import Round
+from .runner import Runner
+from .stacks import STACKS
 
 
 def client_for(hub):
@@ -41,6 +43,10 @@ def echo(event):
         line = f"   ERROR  {event['label']}: {event['error']}"
     elif t == "tests" and event["target"] == "all":
         line = f"   tests  full run {'passed' if event['passed'] else 'failed'}"
+    elif t == "agent_step":
+        line = f"          {event['task']} step {event['step']}: {event['action']} {event['path']}".rstrip()
+    elif t == "blocked_code":
+        line = f"   GUARD  {event['path']}: {event['problems']}"
     elif t in ("note", "contract") or (t == "question" and event["blocking"]):
         line = "   " + (event.get("text") or f"contract {event['path']} v{event['version']}: {event['reason']}")
     else:
@@ -62,7 +68,10 @@ def cmd_init(hub, args):
         if role not in ROLES or not model:
             raise HubError(f"--model takes role=model with a role from {', '.join(ROLES)}")
         models[role] = model
-    return hub.init(idea, {"models": models} if models else None)
+    config = {"stack": args.stack}
+    if models:
+        config["models"] = models
+    return hub.init(idea, config)
 
 
 def cmd_check(hub, args):
@@ -74,12 +83,16 @@ def cmd_check(hub, args):
         return {"ollama": str(e)}
     wanted = sorted(set(cfg["models"].values()))
     missing = [m for m in wanted if m not in installed and f"{m}:latest" not in installed]
+    runner = Runner(hub.project, hub.stack, sandbox=cfg["sandbox"])
     return {
         "ollama": "running",
+        "stack": hub.stack.name,
         "models": wanted,
         "missing": missing,
         "pull": [f"ollama pull {m}" for m in missing],
-        "sandbox": bool(cfg["sandbox"] and sys.platform == "darwin" and shutil.which("sandbox-exec")),
+        "sandbox": runner.sandbox,
+        "node": bool(shutil.which("node")) if hub.stack.name == "web" else None,
+        "chrome_for_page_check": bool(runner.chrome()) if hub.stack.name == "web" else None,
     }
 
 
@@ -141,6 +154,7 @@ def build_parser():
     p = sub.add_parser("init", help="start a project from an idea")
     p.add_argument("--idea")
     p.add_argument("--idea-file", help="a file holding the idea, or - for stdin")
+    p.add_argument("--stack", choices=sorted(STACKS), default="web", help="web (default): a designed browser app; python")
     p.add_argument("--model", action="append", default=[], help="role=model, e.g. builder=qwen2.5-coder:7b")
 
     sub.add_parser("check", help="check that Ollama runs and has every model local.json names")

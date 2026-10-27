@@ -12,12 +12,7 @@ is rendered from the registry for people to read.
 
 from __future__ import annotations
 
-import re
-from pathlib import PurePosixPath
-
 from .protocol import FILE_PLAN, validate
-
-PATH = re.compile(r"^[a-z_][a-z0-9_]*(/[a-z_][a-z0-9_]*)*\.py$")
 
 
 class ContractError(ValueError):
@@ -29,28 +24,19 @@ def file_id(path):
     return path.replace("/", "-").replace("_", "-").replace(".", "-")
 
 
-def test_path(path):
-    """Where a file's tests live: app/geo.py -> tests/test_app_geo.py."""
-    return "tests/test_" + "_".join(PurePosixPath(path).with_suffix("").parts) + ".py"
-
-
-def module_name(path):
-    """The import name for a file: app/geo.py -> app.geo."""
-    return ".".join(PurePosixPath(path).with_suffix("").parts)
-
-
-def check_path(path):
-    if not PATH.match(path) or path.startswith("tests/"):
-        raise ContractError(
-            f"{path!r} must be a relative .py path of lowercase names outside tests/, like app/geo.py"
-        )
-    return path
-
-
 class Contracts:
     def __init__(self, hub):
         self.hub = hub
         self.dir = hub.root / "contracts"
+
+    @property
+    def stack(self):
+        return self.hub.stack
+
+    def check_path(self, path):
+        if not self.stack.check_path(path):
+            raise ContractError(f"{path!r} must be a lowercase path in app/, like {self.stack.example}")
+        return path
 
     def _path(self, path):
         return self.dir / f"{file_id(path)}.json"
@@ -76,7 +62,7 @@ class Contracts:
     def upsert(self, plan, round_no, reason):
         """Add a file's contract, or change it. Returns (contract, what) with what in new/changed/same."""
         validate(plan, FILE_PLAN, "file plan")
-        path = check_path(plan["path"])
+        path = self.check_path(plan["path"])
         fields = {
             "purpose": plan["purpose"].strip(),
             "exports": sorted(plan["exports"], key=lambda e: e["name"]),
@@ -87,8 +73,8 @@ class Contracts:
                 contract = {
                     "id": file_id(path),
                     "path": path,
-                    "module": module_name(path),
-                    "test_path": test_path(path),
+                    "module": self.stack.import_name(path),
+                    "test_path": self.stack.test_path(path),
                     "version": 1,
                     "history": [{"version": 1, "round": round_no, "reason": reason}],
                     **fields,
@@ -150,10 +136,9 @@ class Contracts:
 
     # What agents and people read
 
-    @staticmethod
-    def describe(contract):
+    def describe(self, contract):
         lines = [
-            f"File {contract['path']} (import as {contract['module']}), contract v{contract['version']}",
+            f"File {contract['path']} ({self.stack.import_hint(contract['path'])}), contract v{contract['version']}",
             f"Purpose: {contract['purpose']}",
             "Exports:",
         ]

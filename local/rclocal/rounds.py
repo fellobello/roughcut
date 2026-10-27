@@ -1,19 +1,25 @@
 """One round: plan, build every ready file in parallel, verify, then questions for the user.
 
 This is the only part that writes the project's files and the hub. Agents return data
-(protocol.REPLIES); the round checks it, writes it, runs the tests and decides what
-happens next. A task starts as soon as a slot is free and everything it depends on is
-done, so one slow file doesn't hold up the rest.
+(protocol.REPLIES) or code; the round checks it, writes it, runs it inside the box
+(runner.py) and decides what happens next. A task starts as soon as a slot is free and
+everything it depends on is done, so one slow file doesn't hold up the rest.
 
-Each file gets two tasks: `<id>-tests`, written from the contract alone, then `<id>`,
-which writes the file and retries against those tests. When a file still fails after
-`fix_tries`, a reviewer decides whether the code, the test or the contract is wrong.
+Each logic file gets two tasks: `<id>-tests`, written from the contract alone, then `<id>`,
+a builder agent that owns that one file. The agent picks its own steps (read, write,
+test, finish, ask), but every step is carried out here and only if it's allowed: it
+can read only its file, its tests and the files it imports, write only its own file,
+and nothing it writes runs until the stack's guard has passed it. When an agent runs
+out of steps with failing tests, a reviewer decides whether the code, the test or the
+contract is wrong. On the web stack, a designer then makes index.html and styles.css,
+and the page is loaded in headless Chrome to check that it works.
 """
 
 from __future__ import annotations
 
-import ast
 import asyncio
+import json
+import posixpath
 import re
 import subprocess
 
@@ -26,7 +32,11 @@ from .scheduler import Scheduler
 
 OPEN_FENCE = re.compile(r"^\s*```[a-zA-Z]*[ \t]*\n")
 CLOSE_FENCE = re.compile(r"\n?```\s*$")
+PAGE_IMPORT = re.compile(r"""import\s*\{([^}]*)\}\s*from\s*['"]\./(app/[^'"]+)['"]""")
 MAX_DECISIONS = 5  # per task; small models over-report
+KEEP_TURNS = 8  # agent messages kept after the opening two, so its context stays small
+DESIGN_TASK = "page-design"
+VERIFY_PARALLEL = 3
 
 
 def clean_code(text):
@@ -35,42 +45,39 @@ def clean_code(text):
     return CLOSE_FENCE.sub("", text).strip() + "\n"
 
 
+def norm(path):
+    """A path as the model wrote it, tidied: './app/x.js' -> 'app/x.js'. '..' parts stay, and fail the allow-list."""
+    path = path.strip()
+    return posixpath.normpath(path) if path else ""
+
+
 def cut_off_note(path):
     return f"{path} was cut off before it ended: it ran past the length limit. Write it shorter."
 
 
-def defined_names(code):
-    names = set()
-    for node in ast.parse(code).body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            names.add(node.name)
-        elif isinstance(node, ast.Assign):
-            names.update(t.id for t in node.targets if isinstance(t, ast.Name))
-        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-            names.add(node.target.id)
-    return names
-
-
-def check_code(code, path, exports=()):
-    """Return a problem to send back to the model, or "" when the file is usable."""
-    try:
-        compile(code, path, "exec")
-    except SyntaxError as e:
-        return f"SyntaxError on line {e.lineno}: {e.msg}"
-    missing = sorted({e["name"].split(".")[0] for e in exports} - defined_names(code))
+def check_code(stack, code, path, exports=()):
+    """Return (problem, guarded): a problem to send back, or "" when the file may be written and run."""
+    blocked = stack.guard(code)
+    if blocked:
+        return f"rejected by the safety guard, not run: it {'; '.join(blocked)}. Remove that.", True
+    problem = stack.syntax_error(code, path)
+    if problem:
+        return problem, False
+    missing = sorted({e["name"].split(".")[0] for e in exports} - stack.defined_names(code))
     if missing:
-        return f"the file doesn't define these exports from its contract: {', '.join(missing)}"
-    return ""
+        return f"the file doesn't define these exports from its contract: {', '.join(missing)}", False
+    return "", False
 
 
 class Round:
     def __init__(self, hub, llm, echo=None):
         self.hub = hub
         self.cfg = hub.local_config()
+        self.stack = hub.stack
         self.events = hub.events
         self.events.echo = echo
         self.sched = Scheduler(llm, self.cfg, self.events)
-        self.runner = Runner(hub.project, self.cfg["test_timeout"], self.cfg["sandbox"], self.events)
+        self.runner = Runner(hub.project, self.stack, self.cfg["test_timeout"], self.cfg["sandbox"], self.events)
         self.requests = []  # (task id, contract request), applied between tasks
         self.number = None
 
@@ -82,6 +89,8 @@ class Round:
         self.events.round = self.number
         idea = (hub.root / "idea.md").read_text(encoding="utf-8").strip()
         self.events.emit("round_start", idea=idea[:300])
+        if not self.runner.sandbox:
+            self.events.emit("note", text="sandbox-exec isn't available: tests run with limits but without the sandbox")
         hub.release()
         for task_id in hub.retry_failed():
             self.events.emit("note", text=f"retrying {task_id}, which failed last round")
@@ -91,16 +100,15 @@ class Round:
         self.commit(f"Round {self.number} plan")
 
         self.events.emit("phase", name="build")
-        await self.build_pass()
+        await self.build_pass(idea)
 
         self.events.emit("phase", name="verify")
-        passed, output = await self.runner.run()
-        if not passed and self.reopen_failures(output):
+        passed, failing, output = await self.verify()
+        if failing and self.reopen(failing):
             self.events.emit("phase", name="fix")
-            await self.build_pass()
-            passed, output = await self.runner.run()
-            if not passed:
-                self.reopen_failures(output)  # left for the next round
+            await self.build_pass(idea)
+            passed, failing, output = await self.verify()
+            self.reopen(failing)  # left for the next round
 
         self.events.emit("phase", name="questions")
         notes = await self.report_notes(passed, output)
@@ -109,6 +117,7 @@ class Round:
         report = hub.report(notes)
         self.commit(f"Round {self.number} questions")
         status = hub.status()
+        screen = hub.root / "screens" / f"round-{self.number}.png"
         summary = {
             "round": self.number,
             "tasks": status["tasks"],
@@ -117,6 +126,7 @@ class Round:
             "guesses_to_confirm": len(status["guesses_to_confirm"]),
             "complete": complete,
             "report": report["path"],
+            "screenshot": str(screen) if screen.exists() else None,
         }
         hub.next_round()
         self.events.emit("round_end", summary=summary)
@@ -132,10 +142,14 @@ class Round:
         if not (first or answers or not has_todo):
             self.events.emit("note", text="unfinished tasks and no new answers, so the plan stays as it is")
             return None
-        contracts_md = "\n\n".join(hub.contracts.describe(c) for c in hub.contracts.all())
-        reply = await agents.plan(self.sched, idea, hub.memory.conventions(), contracts_md, answers, first)
+        reply = await agents.plan(
+            self.sched, self.stack, idea, hub.memory.conventions(), self.contracts_md(), answers, first
+        )
         self.apply_plan(reply)
         return reply["complete"]
+
+    def contracts_md(self):
+        return "\n\n".join(self.hub.contracts.describe(c) for c in self.hub.contracts.all())
 
     def apply_plan(self, reply):
         hub, contracts = self.hub, self.hub.contracts
@@ -162,14 +176,18 @@ class Round:
                     f"dropped imports with no contract: {', '.join(unknown)}",
                 )
                 planned[i] = (contract, what)
+        changed = False
         for contract, what in planned:
             if what == "same":
                 continue
+            changed = True
             self.events.emit("contract", path=contract["path"], version=contract["version"], reason=what)
             self.ensure_tasks(contract, what)
             if what == "changed":
                 for path in contracts.dependents(contract["path"]):
                     self.redo(file_id(path), f"{contract['path']} changed to contract v{contract['version']}")
+        if self.stack.name == "web" and contracts.all():
+            self.ensure_design_task(changed)
         self.write_packages()
         errors = hub.check()
         if errors:
@@ -187,6 +205,17 @@ class Round:
         for task_id in (test_id, build_id):
             self.redo(task_id, f"contract changed to v{contract['version']}")
 
+    def ensure_design_task(self, changed):
+        """The page waits for every logic file, and is redone when any contract changes."""
+        hub = self.hub
+        build_ids = [c["id"] for c in hub.contracts.all()]
+        if not any(t["id"] == DESIGN_TASK for t in hub.tasks()):
+            hub.add_task(DESIGN_TASK, "Design the page", "build", "index.html", build_ids, "index.html and styles.css")
+            return
+        hub.set_depends(DESIGN_TASK, build_ids)
+        if changed:
+            self.redo(DESIGN_TASK, "the contracts changed")
+
     def redo(self, task_id, reason):
         task = self.hub.task(task_id)
         if task["status"] in ("done", "failed", "blocked"):
@@ -195,6 +224,8 @@ class Round:
             self.hub.note(task_id, reason)
 
     def write_packages(self):
+        if self.stack.name != "python":
+            return
         folders = {"tests"}
         for contract in self.hub.contracts.all():
             parts = contract["path"].split("/")[:-1]
@@ -206,14 +237,14 @@ class Round:
 
     # Build
 
-    async def build_pass(self):
+    async def build_pass(self, idea):
         limit = self.cfg["max_parallel_tasks"]
         running = {}
         while True:
             free = limit - len(running)
             if free > 0:
                 for task in self.hub.start_tasks(free):
-                    running[task["id"]] = asyncio.ensure_future(self.run_task(task))
+                    running[task["id"]] = asyncio.ensure_future(self.run_task(task, idea))
             if not running:
                 break
             done, _ = await asyncio.wait(running.values(), return_when=asyncio.FIRST_COMPLETED)
@@ -222,16 +253,17 @@ class Round:
             self.apply_requests()
         self.commit(f"Round {self.number} build")
 
-    async def run_task(self, task):
+    async def run_task(self, task, idea):
         hub = self.hub
-        contract = hub.contracts.get(task["module"])
         self.events.emit("task_start", task=task["id"], kind=task["kind"], path=task["module"], attempt=task["attempts"])
         then = None
         try:
-            if task["kind"] == "test":
-                status, summary = await self.write_tests(task, contract)
+            if task["id"] == DESIGN_TASK:
+                status, summary = await self.design(task, idea)
+            elif task["kind"] == "test":
+                status, summary = await self.write_tests(task, hub.contracts.get(task["module"]))
             else:
-                status, summary, then = await self.build(task, contract)
+                status, summary, then = await self.build(task, hub.contracts.get(task["module"]))
         except LLMError as e:
             status, summary = "failed", f"a model call failed: {e}"
         hub.finish(task["id"], status, summary)
@@ -242,12 +274,20 @@ class Round:
     async def write_tests(self, task, contract):
         notes = list(task["notes"])
         brief = self.hub.contracts.brief(contract["path"])
+        problem = ""
         for _ in range(2):
-            text, cut = await agents.write_tests(self.sched, brief, self.hub.memory.conventions(), contract["test_path"], notes)
+            text, cut = await agents.write_tests(
+                self.sched, self.stack, brief, self.hub.memory.conventions(), contract["test_path"], notes
+            )
             code = clean_code(text)
-            problem = cut_off_note(contract["test_path"]) if cut else check_code(code, contract["test_path"])
-            if not problem and contract["module"] not in code:
-                problem = f"the tests never import {contract['module']}"
+            if cut:
+                problem, guarded = cut_off_note(contract["test_path"]), False
+            else:
+                problem, guarded = check_code(self.stack, code, contract["test_path"])
+            if guarded:
+                self.events.emit("blocked_code", task=task["id"], path=contract["test_path"], problems=problem)
+            if not problem and not self.stack.test_imports_it(code, contract["path"]):
+                problem = f"the tests never import {contract['path']}"
             if not problem:
                 break
             notes.append(f"Your last test file was rejected: {problem}")
@@ -257,32 +297,89 @@ class Round:
         return "done", f"wrote {contract['test_path']}"
 
     async def build(self, task, contract):
-        """Returns (status, summary, then): `then` runs after the task is finished, to send it back."""
-        hub = self.hub
-        path, target = contract["path"], hub.project / contract["path"]
-        brief = hub.contracts.brief(path)
-        previous = target.read_text(encoding="utf-8") if target.exists() else ""
-        failure, passed, tries = "", False, 0
-        for tries in range(1, self.cfg["fix_tries"] + 1):
-            text, cut = await agents.build_file(
-                self.sched, brief, path, hub.memory.conventions(), hub.memory.lessons(), task["notes"], previous, failure
-            )
-            code = clean_code(text)
-            hub._write_text(target, code)
-            failure = cut_off_note(path) if cut else check_code(code, path, contract["exports"])
-            if not failure:
-                passed, output = await self.runner.run(contract["test_path"])
-                if passed:
-                    break
-                failure = output
-            previous = code
-        await self.take_notes(task, contract, code, "" if passed else failure, learned=passed and tries > 1)
+        """Run the builder agent for one file. Returns (status, summary, then).
+
+        `then` runs after the task is finished, to send it back for another attempt.
+        """
+        hub, stack = self.hub, self.stack
+        path, test_path = contract["path"], contract["test_path"]
+        target = hub.project / path
+        readable = [path, test_path] + contract["imports"]
+        steps = self.cfg["agent_steps"]
+        notes = list(task["notes"])
+        if target.exists():
+            notes.append(f"{path} already has a version from an earlier attempt; read it before rewriting it.")
+        messages = agents.builder_conversation(
+            stack, hub.contracts.brief(path), path, test_path, hub.memory.conventions(), hub.memory.lessons(),
+            notes, readable, steps,
+        )
+        code = target.read_text(encoding="utf-8") if target.exists() else ""
+        passed, failure, writes = False, "", 0
+        for step_no in range(1, steps + 1):
+            step = await agents.next_step(self.sched, messages, f"step:{path}")
+            action, arg, note = step["action"], norm(step["path"]), step["note"].strip()
+            self.events.emit("agent_step", task=task["id"], step=step_no, action=action, path=arg, note=note[:200])
+            messages.append({"role": "assistant", "content": json.dumps(step)})
+            if action == "read":
+                seen = self.read_for(arg, readable)
+            elif action == "write":
+                text, cut = await agents.write_owned_file(self.sched, stack, messages, path, f"build:{path}")
+                new = clean_code(text)
+                problem, guarded = (cut_off_note(path), False) if cut else check_code(stack, new, path, contract["exports"])
+                if guarded:
+                    self.events.emit("blocked_code", task=task["id"], path=path, problems=problem)
+                if problem:
+                    seen = f"Not written: {problem}"
+                    failure = problem
+                else:
+                    hub._write_text(target, new)
+                    code, writes = new, writes + 1
+                    passed, output = await self.runner.run(test_path)  # every good write is tested at once
+                    failure = "" if passed else output
+                    seen = "Written, and all its tests pass." if passed else self.failed_tests(output, code)
+            elif action == "test":
+                if not code:
+                    seen = f"Nothing to test yet: write {path} first."
+                else:
+                    passed, output = await self.runner.run(test_path)
+                    failure = "" if passed else output
+                    seen = "All tests pass." if passed else self.failed_tests(output, code)
+            elif action == "finish":
+                seen = "" if passed else f"You can't finish while the tests fail. {failure[-1500:] or 'Write your file first.'}"
+            else:  # ask
+                question = hub.ask(
+                    task["id"], note or f"{path} can't keep its contract. What should change?", critical=True,
+                    options=["Change the contract", "Drop this file", "Simplify what it does"],
+                )
+                self.events.emit("question", id=question["id"], text=question["text"], blocking=True)
+                return "blocked", f"asked you: {question['text']}", None
+            if passed:
+                break  # don't spend a model call on "finish" once the tests pass
+            messages.append({"role": "user", "content": seen + "\nChoose your next action."})
+            messages[2:] = messages[2:][-KEEP_TURNS:]
+        await self.take_notes(task, contract, code, failure, learned=passed and writes > 1)
         if passed:
-            return "done", f"{path} passes its tests" + (f" after {tries} tries" if tries > 1 else ""), None
+            return "done", f"{path} passes its tests" + (f" after {writes} writes" if writes > 1 else ""), None
+        if not code:
+            return "failed", "the agent never wrote a usable file", None
         return await self.after_failure(task, contract, code, failure)
+
+    def read_for(self, path, readable):
+        if path not in readable:
+            return f"You may not read {path or 'that'}. You may read: {', '.join(readable)}."
+        file = self.hub.project / path
+        if not file.exists():
+            return f"{path} doesn't exist yet."
+        return f"{path}:\n```\n{file.read_text(encoding='utf-8')[:6000]}\n```"
+
+    @staticmethod
+    def failed_tests(output, code):
+        return f"Its tests fail:\n{output[-1800:]}\n\nYour file now:\n```\n{code[:5000]}\n```"
 
     async def take_notes(self, task, contract, code, failure, learned):
         """Ask the builder what it decided and needs. Optional: a failed call only loses the notes."""
+        if not code:
+            return
         try:
             notes = await agents.file_notes(self.sched, self.hub.contracts.brief(contract["path"]), contract["path"], code, failure)
         except LLMError as e:
@@ -318,6 +415,57 @@ class Round:
         self.events.emit("question", id=question["id"], text=question["text"], blocking=True)
         return "blocked", f"needs your answer: {reason}", None
 
+    # Design (web stack)
+
+    async def design(self, task, idea):
+        hub = self.hub
+        notes = list(task["notes"])
+        problem = ""
+        for attempt in range(1, self.cfg["design_tries"] + 1):
+            text, cut = await agents.design_page(self.sched, idea, self.contracts_md(), hub.memory.conventions(), notes)
+            html = clean_code(text)
+            problem = cut_off_note("index.html") if cut else self.page_problem(html)
+            if not problem:
+                text, cut = await agents.design_styles(self.sched, html, notes)
+                css = clean_code(text)
+                guarded = self.stack.guard(css)
+                problem = cut_off_note("styles.css") if cut else (
+                    f"styles.css was rejected by the safety guard: {'; '.join(guarded)}" if guarded else ""
+                )
+            if not problem:
+                hub._write_text(hub.project / "index.html", html)
+                hub._write_text(hub.project / "styles.css", css)
+                screen = hub.root / "screens" / f"round-{self.number}.png"
+                ok, problem = await self.runner.check_page(screenshot=screen)
+                if ok:
+                    return "done", "index.html and styles.css work in the browser" + (f" ({problem})" if problem else "")
+            self.events.emit("note", text=f"page attempt {attempt} rejected: {problem}")
+            notes.append(f"Attempt {attempt} was rejected: {problem}")
+        return "failed", f"no working page after {self.cfg['design_tries']} tries: {problem}"
+
+    def page_problem(self, html):
+        guarded = self.stack.guard(html)
+        if guarded:
+            return f"rejected by the safety guard: {'; '.join(guarded)}"
+        if 'type="module"' not in html:
+            return 'the page needs one <script type="module">'
+        if "dataset.ready" not in html:
+            return 'the script must end with document.body.dataset.ready = "1";'
+        exports = {c["path"]: {e["name"] for e in c["exports"]} for c in self.hub.contracts.all()}
+        imports = PAGE_IMPORT.findall(html)
+        if not imports:
+            return "the page script imports nothing from ./app/"
+        for names, path in imports:
+            if path not in exports:
+                return f"the page imports ./{path}, which doesn't exist; files: {', '.join(sorted(exports))}"
+            wanted = {n.split(" as ")[0].strip() for n in names.split(",") if n.strip()}
+            missing = sorted(wanted - exports[path])
+            if missing:
+                return f"./{path} doesn't export {', '.join(missing)}; it exports {', '.join(sorted(exports[path]))}"
+        return ""
+
+    # Notes, decisions and contract requests
+
     def record(self, task_id, decisions):
         for decision in decisions[:MAX_DECISIONS]:
             if decision["text"].strip() and decision["choice"].strip():
@@ -343,12 +491,15 @@ class Round:
         hub, contracts = self.hub, self.hub.contracts
         requests, self.requests = self.requests, []
         for task_id, request in requests:
-            target = request["path"]
+            target = norm(request["path"])
             names = [e for e in request["add_exports"] if e["name"].strip()]
             if not names or not contracts.exists(target):
                 continue
-            asker = hub.contracts.get(hub.task(task_id)["module"])
+            asker = contracts.get(hub.task(task_id)["module"])
             if target == asker["path"]:
+                continue
+            if target in contracts.dependents(asker["path"]):
+                self.events.emit("note", text=f"{task_id} asked {target} for exports, but that would make a circle")
                 continue
             contract, added = contracts.add_exports(target, names, self.number, f"{task_id} asked: {request['why']}")
             if not added:
@@ -363,27 +514,42 @@ class Round:
 
     # Verify and report
 
-    def reopen_failures(self, output):
-        by_test = {c["test_path"]: c for c in self.hub.contracts.all()}
+    async def verify(self):
+        """Run every built file's tests, a few at a time. Returns (all passed, failing contracts, output)."""
+        project = self.hub.project
+        built = [c for c in self.hub.contracts.all() if (project / c["path"]).exists() and (project / c["test_path"]).exists()]
+        gate = asyncio.Semaphore(VERIFY_PARALLEL)
+
+        async def one(contract):
+            async with gate:
+                return contract, await self.runner.run(contract["test_path"])
+
+        results = await asyncio.gather(*(one(c) for c in built))
+        failing = [c for c, (ok, _) in results if not ok]
+        output = "\n".join(f"{c['test_path']}:\n{out[-600:]}" for c, (ok, out) in results if not ok)
+        everything = len(built) == len(self.hub.contracts.all())
+        self.events.emit("note", text=f"verify: {len(built) - len(failing)} of {len(self.hub.contracts.all())} files pass")
+        return bool(built) and not failing and everything, failing, output
+
+    def reopen(self, failing):
         reopened = []
-        for test_file in self.runner.failing_test_files(output):
-            contract = by_test.get(test_file)
-            if contract and self.hub.task(contract["id"])["status"] == "done":
-                self.hub.reopen(contract["id"], f"the full test run fails in {test_file}")
+        for contract in failing:
+            if self.hub.task(contract["id"])["status"] == "done":
+                self.hub.reopen(contract["id"], f"{contract['test_path']} fails when run on its own")
                 reopened.append(contract["id"])
         return reopened
 
     async def report_notes(self, passed, output):
         tasks = self.hub.tasks()
         facts = "\n".join(f"- {t['id']} ({t['kind']}): {t['status']}. {t['summary'] or ''}" for t in tasks)
-        facts += f"\n\nFull test run: {'passed' if passed else 'failed'}."
-        if not passed:
-            facts += "\nEnd of the output:\n" + output[-800:]
+        facts += f"\n\nAll tests: {'pass' if passed else 'some fail or are missing'}."
+        if output:
+            facts += "\nFailures:\n" + output[-800:]
         try:
             return (await agents.report(self.sched, facts))["notes"]
         except LLMError:
             done = sum(t["status"] == "done" for t in tasks)
-            return f"{done} of {len(tasks)} tasks are done. The full test run {'passed' if passed else 'failed'}."
+            return f"{done} of {len(tasks)} tasks are done. All tests {'pass' if passed else 'do not pass yet'}."
 
     def commit(self, message):
         git = ["git", "-C", str(self.hub.project)]
