@@ -29,6 +29,7 @@ from .hub_local import HUB_OWNER, HubError
 from .llm import LLMError
 from .runner import Runner
 from .scheduler import Scheduler
+from .stacks import filter_styles
 
 OPEN_FENCE = re.compile(r"^\s*```[a-zA-Z]*[ \t]*\n")
 CLOSE_FENCE = re.compile(r"\n?```\s*$")
@@ -279,7 +280,7 @@ class Round:
             text, cut = await agents.write_tests(
                 self.sched, self.stack, brief, self.hub.memory.conventions(), contract["test_path"], notes
             )
-            code = clean_code(text)
+            code = self.stack.repair_test(clean_code(text))
             if cut:
                 problem, guarded = cut_off_note(contract["test_path"]), False
             else:
@@ -288,6 +289,8 @@ class Round:
                 self.events.emit("blocked_code", task=task["id"], path=contract["test_path"], problems=problem)
             if not problem and not self.stack.test_imports_it(code, contract["path"]):
                 problem = f"the tests never import {contract['path']}"
+            if not problem:
+                problem = self.stack.test_problem(code)
             if not problem:
                 break
             notes.append(f"Your last test file was rejected: {problem}")
@@ -419,6 +422,9 @@ class Round:
 
     async def design(self, task, idea):
         hub = self.hub
+        for name, text in self.stack.scaffold(hub.project).items():
+            if not (hub.project / name).exists():
+                hub._write_text(hub.project / name, text)  # projects made before the kit existed
         notes = list(task["notes"])
         problem = ""
         for attempt in range(1, self.cfg["design_tries"] + 1):
@@ -427,7 +433,9 @@ class Round:
             problem = cut_off_note("index.html") if cut else self.page_problem(html)
             if not problem:
                 text, cut = await agents.design_styles(self.sched, html, notes)
-                css = clean_code(text)
+                css, dropped = filter_styles(clean_code(text))
+                if dropped:
+                    self.events.emit("note", text=f"styles.css: dropped rules that restyled the kit: {', '.join(dropped[:8])}")
                 guarded = self.stack.guard(css)
                 problem = cut_off_note("styles.css") if cut else (
                     f"styles.css was rejected by the safety guard: {'; '.join(guarded)}" if guarded else ""
@@ -447,6 +455,8 @@ class Round:
         guarded = self.stack.guard(html)
         if guarded:
             return f"rejected by the safety guard: {'; '.join(guarded)}"
+        if "kit.css" not in html:
+            return 'the page must link kit.css: <link rel="stylesheet" href="kit.css">'
         if 'type="module"' not in html:
             return 'the page needs one <script type="module">'
         if "dataset.ready" not in html:

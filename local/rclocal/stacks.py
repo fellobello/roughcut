@@ -19,7 +19,9 @@ import ast
 import json
 import re
 import subprocess
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
+
+KIT = Path(__file__).with_name("kit.css")
 
 # Python: modules and calls an app or its tests never need.
 PY_BANNED_MODULES = {
@@ -75,6 +77,67 @@ def js_guard(code):
     return sorted({why for pattern, why in JS_BANNED if pattern.search(code)})
 
 
+KIT_CLASSES = None
+BASE_SELECTOR = re.compile(r"(^|[\s,>+~(])(html|body|:root|\*)(?=$|[\s,.:#\[>+~)])")
+
+
+def kit_classes():
+    global KIT_CLASSES
+    if KIT_CLASSES is None:
+        KIT_CLASSES = set(re.findall(r"\.([a-z][a-z0-9-]*)", re.sub(r"/\*.*?\*/", "", KIT.read_text(), flags=re.S)))
+    return KIT_CLASSES
+
+
+def _blocks(css):
+    """Split CSS into top-level (prelude, body) pairs; body is None for statements like @import."""
+    out, i, n = [], 0, len(css)
+    while i < n:
+        brace = css.find("{", i)
+        semi = css.find(";", i)
+        if brace == -1:
+            break
+        if semi != -1 and semi < brace and css[i:semi].strip().startswith("@"):
+            out.append((css[i:semi].strip(), None))
+            i = semi + 1
+            continue
+        depth, j = 1, brace + 1
+        while j < n and depth:
+            depth += {"{": 1, "}": -1}.get(css[j], 0)
+            j += 1
+        out.append((css[i:brace].strip(), css[brace + 1:j - 1]))
+        i = j
+    return out
+
+
+def filter_styles(css):
+    """Drop rules that restyle the kit or the page base, so styles.css can only add to the design.
+
+    Returns (css, dropped selectors). Small models restyle .card and body with variables that
+    don't exist, which breaks a finished design; this keeps their app-specific rules only.
+    """
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    kit = kit_classes()
+    kept, dropped = [], []
+    for prelude, body in _blocks(css):
+        if body is None:
+            continue  # no @import or other statements
+        if prelude.startswith("@media") or prelude.startswith("@supports"):
+            inner, gone = filter_styles(body)
+            dropped += gone
+            if inner.strip():
+                kept.append(f"{prelude} {{\n{inner}}}\n")
+            continue
+        if prelude.startswith("@"):
+            kept.append(f"{prelude} {{{body}}}\n")  # @keyframes and friends
+            continue
+        touches_kit = any(c in kit for c in re.findall(r"\.([a-z][a-z0-9-]*)", prelude))
+        if touches_kit or BASE_SELECTOR.search(prelude):
+            dropped.append(prelude)
+            continue
+        kept.append(f"{prelude} {{{body.rstrip()}\n}}\n")
+    return "\n".join(kept), dropped
+
+
 class Stack:
     name = ""
     lang = ""  # the code fence language
@@ -112,6 +175,17 @@ class Python(Stack):
 
     def test_imports_it(self, test_code, path):
         return self.import_name(path) in test_code
+
+    test_header = "import unittest"
+
+    def repair_test(self, test_code):
+        """Add the standard import small models often forget. Free, unlike another model call."""
+        if "unittest." in test_code and not re.search(r"^\s*import unittest\b", test_code, re.M):
+            test_code = "import unittest\n" + test_code
+        return test_code
+
+    def test_problem(self, test_code):
+        return "" if "unittest" in test_code else "the test file must use unittest (import unittest)"
 
     def defined_names(self, code):
         names = set()
@@ -169,6 +243,26 @@ class Web(Stack):
     def test_imports_it(self, test_code, path):
         return f"../{path}" in test_code
 
+    test_header = "import { test } from 'node:test';\nimport assert from 'node:assert/strict';"
+
+    def repair_test(self, test_code):
+        """Add the node:test and node:assert imports small models often forget. Free, unlike another model call."""
+        lines = []
+        if not re.search(r"""from\s*['"]node:test['"]""", test_code):
+            used = [n for n in ("test", "describe", "it", "before", "after", "beforeEach", "afterEach")
+                    if re.search(rf"(^|[^.\w]){n}\s*\(", test_code)]
+            lines.append(f"import {{ {', '.join(used or ['test'])} }} from 'node:test';")
+        if re.search(r"\bassert\b", test_code) and not re.search(r"""from\s*['"]node:assert(/strict)?['"]""", test_code):
+            lines.append("import assert from 'node:assert/strict';")
+        return "\n".join(lines + [test_code]) if lines else test_code
+
+    def test_problem(self, test_code):
+        if not re.search(r"""import\s*\{[^}]*\}\s*from\s*['"]node:test['"]""", test_code):
+            return "the test file must start with: import { test } from 'node:test';"
+        if not re.search(r"""from\s*['"]node:assert(/strict)?['"]""", test_code):
+            return "the test file must import assert from 'node:assert'"
+        return ""
+
     def defined_names(self, code):
         names = set(re.findall(r"export\s+(?:async\s+)?(?:function\*?|class|const|let|var)\s+([A-Za-z_$][\w$]*)", code))
         for group in re.findall(r"export\s*\{([^}]*)\}", code):
@@ -197,8 +291,12 @@ class Web(Stack):
         return ["node", "--test", "--test-reporter=spec", test_file]
 
     def scaffold(self, project):
-        """Files every web project has: package.json marks the .js files as ES modules."""
-        return {"package.json": json.dumps({"private": True, "type": "module"}, indent=2) + "\n"}
+        """Files every web project has: package.json marks the .js files as ES modules, and
+        kit.css is the design system the designer builds the page from."""
+        return {
+            "package.json": json.dumps({"private": True, "type": "module"}, indent=2) + "\n",
+            "kit.css": KIT.read_text(encoding="utf-8"),
+        }
 
 
 STACKS = {"web": Web(), "python": Python()}

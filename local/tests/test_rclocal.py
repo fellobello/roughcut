@@ -92,7 +92,8 @@ WEB_TESTS = {
 }
 TIP_GOOD = "export function tipFor(bill, percent) {\n  return bill * percent / 100;\n}\n"
 PAGE = (
-    '<!doctype html><html><head><link rel="stylesheet" href="styles.css"></head><body>'
+    '<!doctype html><html><head><link rel="stylesheet" href="kit.css"><link rel="stylesheet" href="styles.css">'
+    '</head><body>'
     '<main class="card"><h1>Tips</h1><output id="out"></output></main>'
     '<script type="module">\nimport { tipFor } from "./app/tip.js";\n'
     'document.getElementById("out").textContent = tipFor(50, 20);\n'
@@ -286,6 +287,26 @@ class CodeChecksTest(unittest.TestCase):
         self.assertIn("subprocess", problem)
         self.assertEqual(check_code(PY, "X: int = 1\nclass Y: pass\n", "a.py", [export("X", "X"), export("Y", "Y")]), ("", False))
 
+    def test_styles_cannot_restyle_the_kit(self):
+        from rclocal.stacks import filter_styles
+
+        css, dropped = filter_styles(
+            "body { background: red }\n.card { border-radius: 0 }\n.share-list li { color: var(--accent); }\n"
+            "@media (max-width: 480px) { .stat { padding: 0 } .share-list { gap: 4px } }\n@import url('x.css');\n"
+        )
+        self.assertEqual(dropped, ["body", ".card", ".stat"])
+        self.assertIn(".share-list li", css)
+        self.assertIn("@media (max-width: 480px)", css)
+        self.assertNotIn("import", css)
+
+    def test_forgotten_test_imports_are_added(self):
+        fixed = WEB.repair_test("import { a } from '../app/a.js';\ntest('a', () => assert.ok(a()));\n")
+        self.assertEqual(WEB.test_problem(fixed), "")
+        self.assertTrue(fixed.startswith("import { test } from 'node:test';\nimport assert from 'node:assert/strict';"))
+        self.assertTrue(PY.repair_test("class T(unittest.TestCase): pass\n").startswith("import unittest\n"))
+        whole = WEB.test_header + "\ntest('a', () => assert.ok(1));\n"
+        self.assertEqual(WEB.repair_test(whole), whole)
+
     @unittest.skipUnless(HAS_NODE, "needs node")
     def test_js_exports_and_syntax(self):
         self.assertEqual(WEB.defined_names("export function a() {}\nexport const B = 1;\nexport { c as d };"), {"a", "B", "d"})
@@ -402,6 +423,7 @@ class WebRoundTest(HubCase):
         self.assertEqual(self.statuses()[DESIGN_TASK], "done")
         self.assertEqual((self.project / "index.html").read_text(), PAGE + "\n")
         self.assertTrue((self.project / "package.json").exists())
+        self.assertIn("--accent", (self.project / "kit.css").read_text())
         self.assertEqual(len(checked), 1)
 
     def test_the_page_may_only_import_real_exports(self):
@@ -412,6 +434,7 @@ class WebRoundTest(HubCase):
         self.assertIn("doesn't export tipTotal", rnd.page_problem(PAGE.replace("{ tipFor }", "{ tipFor, tipTotal }")))
         self.assertIn("doesn't exist", rnd.page_problem(PAGE.replace("./app/tip.js", "./app/split.js")))
         self.assertIn("dataset.ready", rnd.page_problem(PAGE.replace('document.body.dataset.ready = "1";', "")))
+        self.assertIn("kit.css", rnd.page_problem(PAGE.replace('<link rel="stylesheet" href="kit.css">', "")))
         self.assertIn("safety guard", rnd.page_problem(PAGE.replace("<main", '<script src="https://cdn.x/y.js"></script><main')))
 
 

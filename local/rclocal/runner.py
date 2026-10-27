@@ -38,10 +38,44 @@ PROFILE = """(version 1)
 (allow file-write* (subpath "{project}") (subpath "/private/tmp") (subpath "/private/var/folders") (literal "/dev/null"))
 (deny file-read* (subpath "{home}"))
 (allow file-read* (subpath "{project}") (literal "{home}"))
+(allow file-read-metadata {parents})
 """
 KEEP_OUTPUT = 4000  # characters of output kept for the model; the end is where the failures are
 CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 SAFE_ENV = ("PATH", "LANG", "LC_ALL", "TMPDIR")
+PROBE_PAGE = ".probe.html"  # a throwaway copy of index.html with the probe added; git-ignored
+
+# Runs before the app's script, so it sees errors the app throws while loading.
+PROBE_HEAD = """<script>window.__probeErrors = [];
+addEventListener('error', e => __probeErrors.push(String(e.message || e)));
+addEventListener('unhandledrejection', e => __probeErrors.push(String(e.reason)));</script>"""
+# Runs after the app's module script (modules run in order).
+PROBE_TAIL = """<script type="module">
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const report = r => { document.body.dataset.probe = JSON.stringify(r); };
+for (let i = 0; i < 40 && document.body.dataset.ready !== '1'; i++) await sleep(50);
+const main = document.querySelector('main') || document.body;
+const before = main.innerText;
+const fields = [...document.querySelectorAll('input, select, textarea')].filter(el => el.type !== 'hidden');
+const filled = [];
+for (const el of fields) {
+  if (el.type === 'checkbox' || el.type === 'radio') { if (!el.checked) el.click(); filled.push(el.id || el.name || el.type); continue; }
+  if (el.tagName === 'SELECT') { if (el.options.length > 1) el.selectedIndex = 1; }
+  else el.value = el.dataset.sample ?? (el.type === 'number' || el.inputMode === 'decimal' ? '12' : 'Sample');
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+  filled.push(`${el.id || el.name || el.tagName.toLowerCase()}=${el.value}`);
+  await sleep(30);
+}
+const seg = document.querySelector('.seg button[aria-pressed="false"]');
+if (seg) seg.click();
+const primary = document.querySelector('.btn-primary');
+if (primary) primary.click();
+await sleep(300);
+const errorEl = [...document.querySelectorAll('.error')].find(e => e.offsetParent && e.innerText.trim());
+report({ ready: document.body.dataset.ready === '1', errors: window.__probeErrors, filled,
+         changed: main.innerText !== before, error: errorEl ? errorEl.innerText.trim() : '' });
+</script>"""
 
 
 def _limits(cpu_seconds):
@@ -81,8 +115,13 @@ class Runner:
             return cmd
         if self._profile is None:
             fd, self._profile = tempfile.mkstemp(prefix="roughcut-local-", suffix=".sb")
+            # Node checks every folder above a file it loads, so those folders' metadata (not
+            # their contents) stays visible.
+            parents = " ".join(f'(literal "{self._quote(p)}")' for p in self.project.parents) or '(literal "/")'
             with os.fdopen(fd, "w") as f:
-                f.write(PROFILE.format(project=self._quote(self.project), home=self._quote(Path.home().resolve())))
+                f.write(PROFILE.format(
+                    project=self._quote(self.project), home=self._quote(Path.home().resolve()), parents=parents,
+                ))
         return ["sandbox-exec", "-f", self._profile, *cmd]
 
     @staticmethod
@@ -141,43 +180,78 @@ class Runner:
         return CHROME if os.path.exists(CHROME) else shutil.which("google-chrome") or shutil.which("chromium")
 
     async def check_page(self, screenshot=None):
-        """Load index.html in headless Chrome. Returns (ok, problem). ok means the page script finished.
+        """Load index.html in headless Chrome and use it like a person would. Returns (ok, problem).
 
-        The designer's script sets data-ready="1" on <body> as its last step, so a script that
-        throws, or imports something that doesn't exist, leaves it unset.
+        A copy of the page gets a probe: it collects script errors, waits for the app's
+        data-ready="1", then fills each field in turn (its data-sample value, or a plain
+        default), firing input/change after each, clicks the main button if there is one, and
+        checks that the page changed and shows no .error. A page that only looks right fails.
         """
         chrome = self.chrome()
         if not chrome:
             return True, "no Chrome to check the page with; skipped"
+        index = self.project / "index.html"
+        probe_page = self.project / PROBE_PAGE
+        html = index.read_text(encoding="utf-8")
+        probe_page.write_text(_with_probe(html), encoding="utf-8")
         port = free_port()
         server = self.serve(port)
         try:
             await asyncio.sleep(0.6)
-            url = f"http://127.0.0.1:{port}/index.html"
+            base = f"http://127.0.0.1:{port}/"
             with tempfile.TemporaryDirectory(prefix="roughcut-chrome-") as profile:
-                base = [
+                args = [
                     chrome, "--headless=new", "--disable-gpu", f"--user-data-dir={profile}", "--no-first-run",
-                    "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1", "--virtual-time-budget=4000",
+                    "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1", "--virtual-time-budget=6000",
                     "--window-size=1280,900", "--hide-scrollbars",
                 ]
                 dom = await asyncio.to_thread(
-                    subprocess.run, base + ["--dump-dom", url], capture_output=True, text=True, timeout=60
+                    subprocess.run, args + ["--dump-dom", base + PROBE_PAGE], capture_output=True, text=True, timeout=60
                 )
                 if screenshot:
                     Path(screenshot).parent.mkdir(parents=True, exist_ok=True)
                     await asyncio.to_thread(
-                        subprocess.run, base + [f"--screenshot={screenshot}", url], capture_output=True, timeout=60
+                        subprocess.run, args + [f"--screenshot={screenshot}", base + "index.html"],
+                        capture_output=True, timeout=60,
                     )
         except subprocess.TimeoutExpired:
             return False, "the page didn't finish loading within 60s"
         finally:
             self.stop(server)
-        html = dom.stdout
-        if 'data-ready="1"' in html:
-            return True, ""
-        if not html.strip():
-            return False, "the page didn't load at all"
-        return False, (
-            "the page script never finished (body has no data-ready=\"1\"): it threw an error, or imported a "
-            "name or file that doesn't exist"
-        )
+            probe_page.unlink(missing_ok=True)
+        return _probe_verdict(dom.stdout)
+
+
+def _with_probe(html):
+    head = html.find("<head>")
+    html = html[: head + 6] + PROBE_HEAD + html[head + 6:] if head != -1 else PROBE_HEAD + html
+    end = html.rfind("</body>")
+    return html[:end] + PROBE_TAIL + html[end:] if end != -1 else html + PROBE_TAIL
+
+
+def _probe_verdict(dom):
+    import html as html_lib
+    import json
+    import re
+
+    if not dom.strip():
+        return False, "the page didn't load at all"
+    found = re.search(r'data-probe="([^"]*)"', dom)
+    if not found:
+        if 'data-ready="1"' not in dom:
+            return False, (
+                "the page script never finished (body has no data-ready=\"1\"): it threw an error, or imported "
+                "a name or file that doesn't exist"
+            )
+        return False, "the page check couldn't run its probe"
+    r = json.loads(html_lib.unescape(found.group(1)))
+    filled = ", ".join(r["filled"]) or "no fields"
+    if r["errors"]:
+        return False, f"after filling in {filled}, the page threw: {'; '.join(r['errors'][:3])}"
+    if not r["ready"]:
+        return False, 'the page script never set document.body.dataset.ready = "1"'
+    if r["error"]:
+        return False, f"after filling in {filled} with sensible values, the page showed the error: {r['error']}"
+    if not r["changed"]:
+        return False, f"after filling in {filled}, nothing on the page changed: results must update as the user types"
+    return True, ""

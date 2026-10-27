@@ -27,16 +27,27 @@ SAFETY = (
 )
 JSON_ONLY = "Reply with JSON only."
 
-DESIGN_BRIEF = """Design rules for a polished, professional look:
-- One clear purpose per screen: a header with the app name and a one-line description, then the main card.
-- Define colors, spacing and radii as CSS custom properties on :root. Neutral background, one accent color,
-  text with strong contrast. Support dark mode with @media (prefers-color-scheme: dark).
-- System font stack (system-ui, -apple-system, Segoe UI, Roboto, sans-serif). Clear type scale.
-- Content max-width about 720px, centered, generous padding, an 8px spacing scale, 12px rounded corners,
-  soft shadows. Inputs and buttons at least 44px tall with visible focus outlines.
-- Every input has a <label>. Show results in a highlighted area that updates as the user types.
-- Show a friendly empty state and readable error messages, never a blank or broken screen.
-- Must work at 375px wide with no sideways scrolling. No external fonts, images or scripts."""
+DESIGN_BRIEF = """Build the page from kit.css, a finished design system (light and dark mode, spacing,
+type, focus states are all done). Link it before styles.css. Use its classes:
+- Layout: <main class="app">, <header class="app-header"> with <p class="eyebrow">, <h1>, <p class="lede">;
+  .stack (vertical gaps), .row (side-by-side fields that wrap on phones).
+- Surfaces: .card, .card-title, <hr class="divider">.
+- Forms: <div class="field"><label for=..>..</label><input ..><span class="hint">..</span></div>;
+  money inputs: <div class="input-prefix"><span>$</span><input ..></div>;
+  choices: <div class="seg"> of <button type="button" aria-pressed="true|false">;
+  toggles: <label class="switch"><input type="checkbox"> Text</label>;
+  buttons: .btn, .btn-primary, .btn-block.
+- Results: <div class="stats"> of <div class="stat"><div class="stat-label">..</div><div class="stat-value">..</div></div>,
+  add .highlight to the most important one; .list for rows; .badge; .empty for the empty state; .error.
+Update results live as the user types or picks (input and click events), no submit button needed.
+Give every input a data-sample attribute with a realistic example value (data-sample="120").
+Never replace or remove the result elements: show and hide them with the hidden attribute, and put
+empty-state and error text in their own elements.
+Show the .empty state until the inputs are valid, and readable .error text for bad input.
+Example skeleton:
+<main class="app"><header class="app-header"><p class="eyebrow">Tool</p><h1>Name</h1><p class="lede">One line.</p></header>
+<section class="card stack"><div class="row"><div class="field">...</div></div></section>
+<section class="card"><h2 class="card-title">Result</h2><div class="stats">...</div></section></main>"""
 
 
 def code_only(lang):
@@ -90,7 +101,8 @@ async def write_tests(sched, stack, brief, conventions, test_path, notes):
         f"Tester: {TEAM}\n"
         "Write the test file for one file, using only its contract: you never see its code. Test each export "
         "once or twice with typical inputs, comparing floats with a tolerance, and name each test after the "
-        f"promise it checks. Test only what the contract promises. Keep the file under 80 lines.\n{SAFETY}\n"
+        f"promise it checks. Test only what the contract promises. Keep the file under 80 lines. Start the file "
+        f"with:\n{stack.test_header}\n{SAFETY}\n"
         f"{code_only(stack.lang)}"
     )
     user = (
@@ -150,7 +162,7 @@ async def design_page(sched, idea, contracts_md, conventions, notes):
     """Returns (html, cut_off)."""
     system = (
         f"Designer: {TEAM}\n"
-        "Write index.html, the app's only page. Link styles.css. Put the app's script inline in one "
+        "Write index.html, the app's only page. Link kit.css, then styles.css. Put the app's script inline in one "
         "<script type=\"module\"> that imports only the exports listed in Contracts, from './app/<file>.js', "
         "and wires them to the page. Give elements meaningful class names for styles.css to use. The very last "
         "line of the script must be document.body.dataset.ready = \"1\";\n"
@@ -169,8 +181,9 @@ async def design_styles(sched, html, notes):
     """Returns (css, cut_off)."""
     system = (
         f"Designer: {TEAM}\n"
-        "Write styles.css for the page below, styling the class names and elements it uses. Keep it under "
-        f"220 lines.\n{DESIGN_BRIEF}\n{SAFETY}\n{code_only('css')}"
+        "Write styles.css for the page below. kit.css already styles every kit class, so add only what this "
+        "app needs beyond it, using kit's custom properties (var(--accent), var(--space-4) and so on). Never "
+        f"restyle body or the kit classes. Keep it under 60 lines.\n{SAFETY}\n{code_only('css')}"
     )
     user = _section("index.html", html) + _section("Notes", "\n".join(notes))
     return await sched.ask("designer", _chat(system, user), "design:styles.css")

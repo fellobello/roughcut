@@ -81,7 +81,7 @@ class LocalHub(Hub):
         self.memory.init()
         for name, text in stack.scaffold(self.project).items():
             self._write_text(self.project / name, text)
-        self._ignore(".hub/events.jsonl", "__pycache__/", "node_modules/")
+        self._ignore(".hub/events.jsonl", "__pycache__/", "node_modules/", ".probe.html")
         return {**result, "stack": stack.name}
 
     @property

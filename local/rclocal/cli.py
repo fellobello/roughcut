@@ -169,6 +169,10 @@ def build_parser():
     p.add_argument("--text")
     p.add_argument("--keep", action="store_true")
 
+    p = sub.add_parser("redo", help="send a task back for the next round, e.g. redo page-design --reason 'more room'")
+    p.add_argument("id")
+    p.add_argument("--reason", default="asked for by you")
+
     sub.add_parser("questions", help="write QUESTIONS.md and list what needs you")
     sub.add_parser("status", help="summarize tasks and questions")
     p = sub.add_parser("ui", help="serve the status page")
@@ -184,6 +188,7 @@ def main(argv=None):
         "check": cmd_check,
         "round": cmd_round,
         "answer": lambda h, a: h.answer(a.id, a.text, a.keep),
+        "redo": lambda h, a: h.retry(a.id, a.reason),
         "questions": cmd_questions,
         "status": lambda h, a: h.status(),
         "ui": cmd_ui,

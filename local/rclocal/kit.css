@@ -1,0 +1,133 @@
+/* roughcut kit: the design system every web sample starts from.
+   Copied into each project as kit.css by roughcut-local. The designer composes pages
+   from these classes and keeps its own styles.css small, so a small model only has to
+   arrange good parts instead of inventing a whole look. Light and dark built in. */
+
+:root {
+  --bg: #f6f6f3;
+  --surface: #ffffff;
+  --surface-2: #f1f1ed;
+  --ink: #1b1b19;
+  --ink-2: #55554f;
+  --ink-3: #8a8a83;
+  --line: #e4e3dd;
+  --accent: #3b5bdb;
+  --accent-ink: #ffffff;
+  --accent-soft: #e8edff;
+  --good: #1f8a4c;
+  --bad: #c2361f;
+  --radius: 14px;
+  --radius-sm: 10px;
+  --shadow: 0 1px 2px rgb(20 20 18 / 6%), 0 8px 24px rgb(20 20 18 / 6%);
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #121211;
+    --surface: #1c1c1a;
+    --surface-2: #252522;
+    --ink: #efeee9;
+    --ink-2: #b4b3ac;
+    --ink-3: #7f7e78;
+    --line: #2f2f2b;
+    --accent: #7b93f5;
+    --accent-ink: #0f1430;
+    --accent-soft: #232a4a;
+    --good: #5cc98a;
+    --bad: #f07a63;
+    --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 8px 24px rgb(0 0 0 / 25%);
+    color-scheme: dark;
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px/1.5 var(--font);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Layout */
+.app { max-width: 720px; margin: 0 auto; padding: var(--space-7) var(--space-4) var(--space-7); }
+.app-header { margin-bottom: var(--space-5); }
+.eyebrow { margin: 0 0 var(--space-2); color: var(--accent); font-size: 13px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.app-header h1 { margin: 0; font-size: clamp(28px, 5vw, 38px); line-height: 1.15; letter-spacing: -.02em; }
+.lede { margin: var(--space-2) 0 0; color: var(--ink-2); font-size: 17px; }
+.stack { display: grid; gap: var(--space-4); }
+.row { display: grid; gap: var(--space-4); grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+
+/* Surfaces */
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: var(--space-5); }
+.card + .card { margin-top: var(--space-4); }
+.card-title { margin: 0 0 var(--space-4); font-size: 15px; font-weight: 600; color: var(--ink-2); }
+.divider { border: 0; border-top: 1px solid var(--line); margin: var(--space-5) 0; }
+
+/* Forms */
+.field { display: grid; gap: var(--space-2); }
+.field label, .label { font-size: 14px; font-weight: 600; color: var(--ink-2); }
+.hint { font-size: 13px; color: var(--ink-3); }
+.input, .field input, .field select {
+  width: 100%; min-height: 46px; padding: 0 var(--space-3);
+  background: var(--surface-2); color: var(--ink);
+  border: 1px solid transparent; border-radius: var(--radius-sm);
+  font: inherit; font-size: 17px; transition: border-color .15s, background .15s;
+}
+.input:focus, .field input:focus, .field select:focus { outline: none; border-color: var(--accent); background: var(--surface); box-shadow: 0 0 0 3px var(--accent-soft); }
+.input-prefix { position: relative; }
+.input-prefix > span { position: absolute; left: var(--space-3); top: 50%; transform: translateY(-50%); color: var(--ink-3); pointer-events: none; }
+.input-prefix > input { padding-left: calc(var(--space-3) + 14px); }
+
+/* Segmented choice: buttons in a row, one marked aria-pressed="true" */
+.seg { display: flex; flex-wrap: wrap; gap: var(--space-1); padding: var(--space-1); background: var(--surface-2); border-radius: var(--radius-sm); }
+.seg button { flex: 1 1 auto; min-height: 40px; padding: 0 var(--space-3); border: 0; border-radius: 8px; background: transparent; color: var(--ink-2); font: inherit; font-weight: 600; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
+
+/* Buttons */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); min-height: 46px; padding: 0 var(--space-5); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); color: var(--ink); font: inherit; font-weight: 600; cursor: pointer; }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn-block { width: 100%; }
+.btn:focus-visible, .seg button:focus-visible { outline: 3px solid var(--accent-soft); outline-offset: 2px; }
+
+/* Toggle: <label class="switch"><input type="checkbox"> Text</label> */
+.switch { display: flex; align-items: center; gap: var(--space-3); font-weight: 500; cursor: pointer; }
+.switch input { appearance: none; width: 42px; height: 24px; margin: 0; border-radius: 999px; background: var(--line); position: relative; cursor: pointer; transition: background .15s; }
+.switch input::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: transform .15s; }
+.switch input:checked { background: var(--accent); }
+.switch input:checked::after { transform: translateX(18px); }
+
+/* Results */
+.stats { display: grid; gap: var(--space-3); grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.stat { padding: var(--space-4); border-radius: var(--radius-sm); background: var(--surface-2); }
+.stat-label { font-size: 13px; color: var(--ink-3); font-weight: 600; }
+.stat-value { margin-top: var(--space-1); font-size: 26px; font-weight: 700; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+.stat.highlight { background: var(--accent); color: var(--accent-ink); }
+.stat.highlight .stat-label { color: inherit; opacity: .8; }
+.list { list-style: none; margin: 0; padding: 0; }
+.list li { display: flex; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) 0; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+.list li:last-child { border-bottom: 0; }
+.badge { display: inline-block; padding: 2px var(--space-2); border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 12px; font-weight: 600; }
+
+/* States */
+.empty { padding: var(--space-5); text-align: center; color: var(--ink-3); border: 1px dashed var(--line); border-radius: var(--radius-sm); }
+.error { color: var(--bad); font-size: 14px; font-weight: 500; }
+.muted { color: var(--ink-3); }
+.app-footer { margin-top: var(--space-6); text-align: center; color: var(--ink-3); font-size: 13px; }
+[hidden] { display: none !important; }
+
+@media (max-width: 480px) {
+  .app { padding-top: var(--space-6); }
+  .card { padding: var(--space-4); }
+}
