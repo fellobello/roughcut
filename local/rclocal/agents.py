@@ -38,12 +38,12 @@ type, focus states are all done). Link it before styles.css. Use its classes:
   toggles: <label class="switch"><input type="checkbox"> Text</label>;
   buttons: .btn, .btn-primary, .btn-block.
 - Results: <div class="stats"> of <div class="stat"><div class="stat-label">..</div><div class="stat-value">..</div></div>,
-  add .highlight to the most important one; .list for rows; .badge; .empty for the empty state; .error.
+  add .highlight to the most important one; .list for rows; .badge; .error.
 Update results live as the user types or picks (input and click events), no submit button needed.
+Results are always visible: never use the hidden attribute on them, never remove or replace them.
+Before the inputs are valid, every .stat-value shows "—" (an em dash); never write example numbers into
+the HTML. Put readable .error text in its own element, empty when the input is fine.
 Give every input a data-sample attribute with a realistic example value (data-sample="120").
-Never replace or remove the result elements: show and hide them with the hidden attribute, and put
-empty-state and error text in their own elements.
-Show the .empty state until the inputs are valid, and readable .error text for bad input.
 Example skeleton:
 <main class="app"><header class="app-header"><p class="eyebrow">Tool</p><h1>Name</h1><p class="lede">One line.</p></header>
 <section class="card stack"><div class="row"><div class="field">...</div></div></section>

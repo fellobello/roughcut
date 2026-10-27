@@ -56,6 +56,8 @@ const report = r => { document.body.dataset.probe = JSON.stringify(r); };
 for (let i = 0; i < 40 && document.body.dataset.ready !== '1'; i++) await sleep(50);
 const main = document.querySelector('main') || document.body;
 const before = main.innerText;
+const prefilled = [...document.querySelectorAll('.stat-value, .list li, output')]
+  .filter(e => e.offsetParent && /[1-9]/.test(e.innerText)).map(e => e.innerText.trim()).slice(0, 3);
 const fields = [...document.querySelectorAll('input, select, textarea')].filter(el => el.type !== 'hidden');
 const filled = [];
 for (const el of fields) {
@@ -73,8 +75,15 @@ const primary = document.querySelector('.btn-primary');
 if (primary) primary.click();
 await sleep(300);
 const errorEl = [...document.querySelectorAll('.error')].find(e => e.offsetParent && e.innerText.trim());
-report({ ready: document.body.dataset.ready === '1', errors: window.__probeErrors, filled,
-         changed: main.innerText !== before, error: errorEl ? errorEl.innerText.trim() : '' });
+const shown = [...document.querySelectorAll('.stat-value, .list li, output')]
+  .filter(e => e.offsetParent && /[0-9]/.test(e.innerText)).length;
+const name = e => e.tagName.toLowerCase() + (e.id ? '#' + e.id : '') + [...e.classList].map(c => '.' + c).join('');
+const stillHidden = [...document.querySelectorAll('[hidden]')]
+  .filter(e => e.matches('.stats, .stat, .list, output, .stat-value') || e.querySelector('.stat-value, .stat, .list, output'))
+  .map(name).slice(0, 4);
+report({ ready: document.body.dataset.ready === '1', errors: window.__probeErrors, filled, prefilled,
+         changed: main.innerText !== before, error: errorEl ? errorEl.innerText.trim() : '', stillHidden, shown,
+         hasResults: !!document.querySelector('.stat-value, .list, output') });
 </script>"""
 
 
@@ -250,8 +259,20 @@ def _probe_verdict(dom):
         return False, f"after filling in {filled}, the page threw: {'; '.join(r['errors'][:3])}"
     if not r["ready"]:
         return False, 'the page script never set document.body.dataset.ready = "1"'
+    if r.get("prefilled"):
+        return False, (
+            f"before the user entered anything, the results already showed {', '.join(r['prefilled'])}: "
+            "don't put example numbers in the HTML; show the .empty state until the inputs are valid"
+        )
     if r["error"]:
         return False, f"after filling in {filled} with sensible values, the page showed the error: {r['error']}"
+    if r.get("hasResults") and not r.get("shown"):
+        hidden = r.get("stillHidden") or []
+        why = f" These still have the hidden attribute: {', '.join(hidden)}; don't hide results." if hidden else ""
+        return False, f"after filling in {filled}, no result value with a number is visible.{why}"
     if not r["changed"]:
-        return False, f"after filling in {filled}, nothing on the page changed: results must update as the user types"
+        hidden = r.get("stillHidden") or []
+        why = (f" These result elements still have the hidden attribute: {', '.join(hidden)}. Remove hidden from "
+               "every element that contains the results, not only the inner ones.") if hidden else ""
+        return False, f"after filling in {filled}, nothing on the page changed: results must update as the user types.{why}"
     return True, ""
