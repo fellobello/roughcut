@@ -113,5 +113,6 @@ my-idea/
 | `skills/` | The three commands |
 | `tests/` | `python3 -m unittest discover -s tests` for the scripts, `node --test tests/round.test.mjs` for the workflow |
 | `docs/PLAN.md` | The design, and what's planned next |
+| `local/` | Experimental: the same rounds on local Ollama models only, one file per task ([README](local/README.md)) |
 
 Built with Claude Code.
