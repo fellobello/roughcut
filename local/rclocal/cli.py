@@ -23,7 +23,7 @@ from .rounds import Round
 
 def client_for(hub):
     cfg = hub.local_config()
-    return OllamaClient(cfg["host"], cfg["num_ctx"], cfg["temperature"], cfg["keep_alive"])
+    return OllamaClient(cfg["host"], cfg["num_ctx"], cfg["temperature"], cfg["keep_alive"], cfg["call_timeout"])
 
 
 def echo(event):

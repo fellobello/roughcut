@@ -1,10 +1,18 @@
 """Every message format in roughcut-local, in one place.
 
-Parts of the system never pass free text to each other. Each model reply is held to one
-of the reply schemas below (Ollama's `format` field enforces it while the model writes,
-and `validate` checks it again on arrival), and every line in `.hub/events.jsonl` is one
-of the EVENTS. To change how two parts talk, change it here: the agents, the round
-controller, the status page and the tests all read these definitions.
+Parts of the system never pass loose text to each other. There are two kinds of reply:
+
+- Data replies (plans, notes, reviews, reports) are held to one of the schemas in
+  REPLIES. Ollama's `format` field enforces the shape while the model writes, and
+  `validate` checks it again on arrival.
+- Code replies (CODE_ROLES) are one complete file in a single ```python block, and
+  generation stops at the closing fence. Code is never put inside JSON: small models
+  writing a file into a JSON string often never close the string and run on until
+  they hit the token limit.
+
+Every line in `.hub/events.jsonl` is one of the EVENTS. To change how two parts talk,
+change it here: the agents, the round controller, the status page and the tests all
+read these definitions.
 
 The file-level contracts (what each file in the project being built exports and
 imports) are data, not code, and live in the project's `.hub/contracts/`; see
@@ -58,10 +66,9 @@ PLAN = _obj(
     guesses=_list(GUESS),
     complete=BOOL,  # true when these files cover the whole idea and nothing more is worth adding
 )
-TESTS = _obj(["content", "decisions"], content=STR, decisions=_list(DECISION))
-FILE = _obj(
-    ["content", "decisions", "contract_requests", "lesson"],
-    content=STR,
+# What a builder reports about the file it just wrote, in a second, short call.
+NOTES = _obj(
+    ["decisions", "contract_requests", "lesson"],
     decisions=_list(DECISION),
     contract_requests=_list(CONTRACT_REQUEST),
     lesson=STR,  # one line worth remembering for later files, or ""
@@ -70,8 +77,11 @@ BLAMES = ("code", "test", "contract")
 REVIEW = _obj(["blame", "reason"], blame={"type": "string", "enum": list(BLAMES)}, reason=STR)
 REPORT = _obj(["notes"], notes=STR)
 
-REPLIES = {"planner": PLAN, "tester": TESTS, "builder": FILE, "reviewer": REVIEW, "reporter": REPORT}
-ROLES = tuple(REPLIES)
+# Data replies by call kind. "notes" runs on the builder's model.
+REPLIES = {"planner": PLAN, "notes": NOTES, "reviewer": REVIEW, "reporter": REPORT}
+CODE_ROLES = ("tester", "builder")
+CODE_STOP = "\n```"  # the closing fence of a code reply
+ROLES = ("planner", "tester", "builder", "reviewer", "reporter")  # each picks a model in local.json
 
 # Events: type -> fields every event of that type carries. Every event also has "ts" and "round".
 EVENTS = {
@@ -81,7 +91,9 @@ EVENTS = {
     "task_start": ("task", "kind", "path", "attempt"),
     "task_end": ("task", "status", "summary"),
     "llm_start": ("call", "role", "model", "label"),
-    "llm_end": ("call", "role", "model", "label", "seconds", "prompt_tokens", "output_tokens", "tokens_per_second"),
+    "llm_end": (
+        "call", "role", "model", "label", "seconds", "prompt_tokens", "output_tokens", "tokens_per_second", "cut_off",
+    ),
     "llm_error": ("call", "role", "model", "label", "error"),
     "tests": ("target", "passed", "seconds"),
     "contract": ("path", "version", "reason"),

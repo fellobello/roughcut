@@ -39,6 +39,10 @@ DEFAULT_CONFIG = {
     "model_slots": {},  # per-model limit, e.g. {"qwen3:8b": 1}; default 1 each
     "max_parallel_tasks": 3,  # tasks per wave
     "fix_tries": 3,  # write-and-test tries per build task before a review
+    # Longest reply per call kind, in tokens. A model that loses track stops here instead of
+    # writing until the call times out.
+    "max_tokens": {"planner": 3000, "tester": 2500, "builder": 3500, "notes": 800, "reviewer": 600, "reporter": 600},
+    "call_timeout": 900,  # seconds per model call
     "num_ctx": 8192,
     "temperature": 0.2,
     "keep_alive": "30m",

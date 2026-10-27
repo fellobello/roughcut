@@ -24,13 +24,19 @@ from .llm import LLMError
 from .runner import Runner
 from .scheduler import Scheduler
 
-FENCE = re.compile(r"^\s*```[a-zA-Z]*\n(.*?)\n?```\s*$", re.S)
+OPEN_FENCE = re.compile(r"^\s*```[a-zA-Z]*[ \t]*\n")
+CLOSE_FENCE = re.compile(r"\n?```\s*$")
 MAX_DECISIONS = 5  # per task; small models over-report
 
 
 def clean_code(text):
-    match = FENCE.match(text)
-    return (match.group(1) if match else text).strip() + "\n"
+    """The file inside a code reply. Generation stops at the closing fence, so it is usually gone already."""
+    text = OPEN_FENCE.sub("", text, count=1)
+    return CLOSE_FENCE.sub("", text).strip() + "\n"
+
+
+def cut_off_note(path):
+    return f"{path} was cut off before it ended: it ran past the length limit. Write it shorter."
 
 
 def defined_names(code):
@@ -237,9 +243,9 @@ class Round:
         notes = list(task["notes"])
         brief = self.hub.contracts.brief(contract["path"])
         for _ in range(2):
-            reply = await agents.write_tests(self.sched, brief, self.hub.memory.conventions(), contract["test_path"], notes)
-            code = clean_code(reply["content"])
-            problem = check_code(code, contract["test_path"])
+            text, cut = await agents.write_tests(self.sched, brief, self.hub.memory.conventions(), contract["test_path"], notes)
+            code = clean_code(text)
+            problem = cut_off_note(contract["test_path"]) if cut else check_code(code, contract["test_path"])
             if not problem and contract["module"] not in code:
                 problem = f"the tests never import {contract['module']}"
             if not problem:
@@ -248,7 +254,6 @@ class Round:
         else:
             return "failed", f"no usable test file: {problem}"
         self.hub._write_text(self.hub.project / contract["test_path"], code)
-        self.record(task["id"], reply["decisions"])
         return "done", f"wrote {contract['test_path']}"
 
     async def build(self, task, contract):
@@ -259,26 +264,34 @@ class Round:
         previous = target.read_text(encoding="utf-8") if target.exists() else ""
         failure, passed, tries = "", False, 0
         for tries in range(1, self.cfg["fix_tries"] + 1):
-            reply = await agents.build_file(
+            text, cut = await agents.build_file(
                 self.sched, brief, path, hub.memory.conventions(), hub.memory.lessons(), task["notes"], previous, failure
             )
-            code = clean_code(reply["content"])
+            code = clean_code(text)
             hub._write_text(target, code)
-            for request in reply["contract_requests"]:
-                self.requests.append((task["id"], request))
-            failure = check_code(code, path, contract["exports"])
+            failure = cut_off_note(path) if cut else check_code(code, path, contract["exports"])
             if not failure:
                 passed, output = await self.runner.run(contract["test_path"])
                 if passed:
                     break
                 failure = output
             previous = code
-        self.record(task["id"], reply["decisions"])
+        await self.take_notes(task, contract, code, "" if passed else failure, learned=passed and tries > 1)
         if passed:
-            if tries > 1:
-                hub.memory.add_lesson(reply["lesson"], path)
             return "done", f"{path} passes its tests" + (f" after {tries} tries" if tries > 1 else ""), None
         return await self.after_failure(task, contract, code, failure)
+
+    async def take_notes(self, task, contract, code, failure, learned):
+        """Ask the builder what it decided and needs. Optional: a failed call only loses the notes."""
+        try:
+            notes = await agents.file_notes(self.sched, self.hub.contracts.brief(contract["path"]), contract["path"], code, failure)
+        except LLMError as e:
+            self.events.emit("note", text=f"no notes for {contract['path']}: {e}")
+            return
+        self.record(task["id"], notes["decisions"])
+        self.requests.extend((task["id"], r) for r in notes["contract_requests"])
+        if learned:
+            self.hub.memory.add_lesson(notes["lesson"], contract["path"])
 
     async def after_failure(self, task, contract, code, failure):
         hub = self.hub

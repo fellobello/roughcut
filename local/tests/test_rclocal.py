@@ -89,14 +89,16 @@ class Script:
         if role == "planner":
             return self.plan
         if role == "tester":
-            return {"content": self.tests[written(user)], "decisions": []}
+            return "```python\n" + self.tests[written(user)] + "\n```\nThat covers it."
         if role == "builder":
             path = written(user)
             n = self.tries.get(path, 0)
             self.tries[path] = n + 1
             versions = self.builds[path]
+            return "```python\n" + versions[min(n, len(versions) - 1)] + "\n```"
+        if role == "notes":
+            path = re.search(r"## (app/\S+)\n", user).group(1)
             return {
-                "content": "```python\n" + versions[min(n, len(versions) - 1)] + "```",
                 "decisions": [{"text": f"How {path} rounds", "choice": "no rounding", "why": "simple"}],
                 "contract_requests": [],
                 "lesson": "Convert with (f - 32) * 5 / 9." if path == "app/convert.py" else "",
@@ -128,12 +130,14 @@ class HubCase(unittest.TestCase):
 
 
 class ProtocolTest(unittest.TestCase):
-    def test_every_role_has_a_reply_schema(self):
-        self.assertEqual(set(protocol.REPLIES), {"planner", "tester", "builder", "reviewer", "reporter"})
+    def test_every_role_replies_with_data_or_code(self):
+        data_roles = {"planner", "reviewer", "reporter"}
+        self.assertEqual(set(protocol.ROLES), data_roles | set(protocol.CODE_ROLES))
+        self.assertLessEqual(data_roles, set(protocol.REPLIES))
 
     def test_validate_reports_the_missing_field(self):
         with self.assertRaisesRegex(protocol.ProtocolError, "lesson"):
-            protocol.validate({"content": "", "decisions": [], "contract_requests": []}, protocol.FILE)
+            protocol.validate({"decisions": [], "contract_requests": []}, protocol.NOTES)
 
     def test_validate_checks_enums_and_nested_items(self):
         with self.assertRaises(protocol.ProtocolError):
@@ -192,6 +196,8 @@ class ContractsTest(HubCase):
 class CodeChecksTest(unittest.TestCase):
     def test_fences_are_removed(self):
         self.assertEqual(clean_code("```python\nx = 1\n```"), "x = 1\n")
+        self.assertEqual(clean_code("```python\nx = 1"), "x = 1\n")  # closing fence already stopped
+        self.assertEqual(clean_code("x = 1\n"), "x = 1\n")
 
     def test_syntax_errors_and_missing_exports_are_caught(self):
         self.assertIn("SyntaxError", check_code("def f(:\n", "a.py"))
@@ -228,6 +234,22 @@ class RoundTest(HubCase):
         self.assertEqual(script.tries["app/convert.py"], 2)
         self.assertEqual(self.hub.task("app-convert-py")["summary"], "app/convert.py passes its tests after 2 tries")
         self.assertIn("(f - 32) * 5 / 9", self.hub.memory.lessons())
+
+    def test_a_cut_off_file_is_sent_back_shorter(self):
+        script = Script({"app/convert.py": [CONVERT_GOOD], "app/report.py": [REPORT_GOOD]})
+        calls = []
+
+        class CutOnce(FakeLLM):
+            def chat_text(self, model, system, user, think=None, max_tokens=None, stop=None):
+                text, stats = super().chat_text(model, system, user, think, max_tokens, stop)
+                calls.append(written(user))
+                if calls.count(written(user)) == 1 and written(user) == "app/convert.py":
+                    stats.cut_off = True
+                return text, stats
+
+        asyncio.run(Round(self.hub, CutOnce(script)).run())
+        self.assertEqual(calls.count("app/convert.py"), 2)
+        self.assertEqual(self.hub.task("app-convert-py")["status"], "done")
 
     def test_failing_code_is_retried_then_asked_about(self):
         script = Script({"app/convert.py": [CONVERT_BAD], "app/report.py": [REPORT_GOOD]})

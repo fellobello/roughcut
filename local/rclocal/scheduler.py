@@ -1,4 +1,4 @@
-"""Running model calls and test runs in parallel, within what the machine can take.
+"""Running model calls in parallel, within what the machine can take.
 
 At most `max_parallel_calls` model calls run at once, and at most `model_slots[model]`
 (default 1) on any one model, so a 16 GB machine never asks one model for four
@@ -12,7 +12,7 @@ import asyncio
 import itertools
 
 from .llm import LLMError
-from .protocol import REPLIES
+from .protocol import CODE_STOP, REPLIES
 
 
 class Scheduler:
@@ -20,6 +20,7 @@ class Scheduler:
         self.llm = llm
         self.models = config["models"]
         self.think = config.get("think", {})
+        self.max_tokens = config.get("max_tokens", {})
         self.events = events
         self._all = asyncio.Semaphore(config["max_parallel_calls"])
         self._slots = config.get("model_slots", {})
@@ -31,17 +32,27 @@ class Scheduler:
             self._per_model[model] = asyncio.Semaphore(self._slots.get(model, 1))
         return self._per_model[model]
 
-    async def ask(self, role, system, user, label):
-        """One model call for a role. The reply schema comes from protocol.REPLIES[role]."""
+    async def ask(self, role, system, user, label, reply=None):
+        """One call on the role's model.
+
+        With `reply` (a key of protocol.REPLIES), returns that schema's data. Without it,
+        returns (code text, cut_off) for a code reply.
+        """
         model = self.models[role]
-        schema = REPLIES[role]
+        limit = self.max_tokens.get(reply or role)
         async with self._model_lock(model), self._all:
             call = next(self._ids)
             self.events.emit("llm_start", call=call, role=role, model=model, label=label)
             try:
-                reply, stats = await asyncio.to_thread(
-                    self.llm.chat_json, model, system, user, schema, self.think.get(role)
-                )
+                if reply:
+                    result, stats = await asyncio.to_thread(
+                        self.llm.chat_json, model, system, user, REPLIES[reply], self.think.get(role), limit
+                    )
+                else:
+                    text, stats = await asyncio.to_thread(
+                        self.llm.chat_text, model, system, user, self.think.get(role), limit, CODE_STOP
+                    )
+                    result = (text, stats.cut_off)
             except LLMError as e:
                 self.events.emit("llm_error", call=call, role=role, model=model, label=label, error=str(e))
                 raise
@@ -55,5 +66,6 @@ class Scheduler:
                 prompt_tokens=stats.prompt_tokens,
                 output_tokens=stats.output_tokens,
                 tokens_per_second=stats.tokens_per_second,
+                cut_off=stats.cut_off,
             )
-            return reply
+            return result

@@ -12,7 +12,7 @@ can run all night on a laptop.
 | --- | --- | --- |
 | Models | Claude, through Claude Code | Any Ollama models, one per role |
 | Unit of work | A module, in its own git worktree | One file, in the project folder |
-| How agents reply | Tool calls in Claude Code | JSON held to a schema by Ollama's `format` |
+| How agents reply | Tool calls in Claude Code | Data as JSON held to a schema by Ollama's `format`; code as one fenced file |
 | Who writes files | Each agent | Only the round controller |
 | Language of the sample | Any | Python, standard library only (for now) |
 
@@ -109,6 +109,9 @@ Defaults in `.hub/local.json`, picked for a 16 GB Apple M5:
 - Two models fit in memory together. A third makes Ollama swap them in and out.
 - `max_parallel_calls` (2), `model_slots` (1 per model) and `max_parallel_tasks` (3) keep
   the machine from being asked for more than it can do at once.
+- `max_tokens` caps every reply, and `call_timeout` (900 s) every call. Without the cap, a
+  7B model writing code into a JSON string once ran for 30 minutes without closing the
+  string. That's why code now comes back as a plain fenced file.
 
 Change a role's model at init with `--model builder=llama3.1:8b`, or edit `local.json`.
 
