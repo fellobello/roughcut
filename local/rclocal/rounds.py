@@ -22,7 +22,6 @@ import json
 import posixpath
 import re
 import subprocess
-import time
 
 from . import agents, pages, project
 from .contracts import ContractError, file_id
@@ -39,11 +38,14 @@ CLOSE_FENCE = re.compile(r"\n?```\s*$")
 PAGE_IMPORT = re.compile(r"""import\s*\{([^}]*)\}\s*from\s*['"]\./(app/[^'"]+)['"]""")
 MAX_DECISIONS = 2  # per task; small models over-report
 MAX_GUESSES = 3  # per plan, so the questions you get are few and real
-# What you can say when a file is stuck. The first is what happens if you don't answer in time.
+# What you can say about a file the models got stuck on. Nothing waits for your answer:
+# the file is left for you, and the run goes on with everything else.
+LEFT_FOR_YOU = "Left for you"
 STUCK_OPTIONS = [
-    {"label": "Simplify it", "detail": "Make this file do less, so it can pass: the planner trims what it promises next round."},
-    {"label": "Change the contract", "detail": "Tell the planner what this file should promise instead, in your own words."},
-    {"label": "Drop the file", "detail": "Take it out of the plan; anything that needs it is planned again without it."},
+    {"label": LEFT_FOR_YOU, "detail": "It keeps its best attempt, with a comment at the top saying what's missing. "
+                                      "Finish it in any editor; once its tests pass, the next round picks it up."},
+    {"label": "Try again", "detail": "The builder gets a fresh set of tries next round, with what you say here."},
+    {"label": "Simplify it", "detail": "The planner trims what this file promises next round, then it's built again."},
 ]
 KEEP_TURNS = 12  # agent messages kept after the opening two, so its context stays small
 DESIGN_TASK = "page-design"
@@ -121,6 +123,7 @@ class Round:
         if not self.runner.sandbox:
             self.events.emit("note", text="sandbox-exec isn't available: tests run with limits but without the sandbox")
         hub.release()
+        await self.revisit_stuck()
         for task_id in hub.retry_failed():
             self.events.emit("note", text=f"retrying {task_id}, which failed last round")
 
@@ -460,13 +463,9 @@ class Round:
                     seen = "All tests pass." if passed else self.failed_tests(output, code)
             elif action == "finish":
                 seen = "" if passed else f"You can't finish while the tests fail. {failure[-1500:] or 'Write your file first.'}"
-            else:  # ask
-                question = hub.ask(
-                    task["id"], note or f"{path} can't keep its contract. What should change?", critical=True,
-                    options=STUCK_OPTIONS, suggested=STUCK_OPTIONS[0]["label"],
-                )
-                self.events.emit("question", id=question["id"], text=question["text"], blocking=True)
-                return "blocked", f"asked you: {question['text']}", None
+            else:  # ask: nobody waits for an answer; the file is left for you with the agent's question
+                return (*self.hand_over(task, contract, code, note or "the builder says the contract can't work", failure),
+                        None)
             if passed:
                 break  # don't spend a model call on "finish" once the tests pass
             messages.append({"role": "user", "content": seen + "\nChoose your next action."})
@@ -522,14 +521,49 @@ class Round:
         if verdict["blame"] == "code" and task["attempts"] < max_attempts:
             return "failed", f"still failing: {reason}", lambda: hub.retry(task["id"], f"review: {reason}", use_attempt=True)
         what = "its contract can't work as written" if verdict["blame"] == "contract" else "it keeps failing its tests"
+        return (*self.hand_over(task, contract, code, f"{what}: {reason}", failure), None)
+
+    # Files left for you
+
+    def hand_over(self, task, contract, code, why, failure):
+        """Leave a stuck file for you, and record that as a guess. Returns (status, summary).
+
+        The file keeps its best attempt, with a comment at the top saying what it must do,
+        how it's tested and why the models got stuck. Nothing waits: the task is marked
+        failed (so only the files that need it wait), and the run goes on.
+        """
+        hub, path = self.hub, contract["path"]
+        note = self.stack.comment(handover_lines(hub.contracts.brief(path), contract, why, failure, self.stack))
+        body = strip_handover(code) if code else self.stack.comment(["Nothing here yet."])
+        hub._write_text(hub.project / path, note + "\n" + body)
         question = hub.ask(
-            task["id"],
-            f"{contract['path']}: {what} ({reason}). What should change?",
-            critical=True,
-            options=STUCK_OPTIONS, suggested=STUCK_OPTIONS[0]["label"],
+            task["id"], f"{path} is left for you: {why}", critical=True, choice=LEFT_FOR_YOU,
+            why="The models couldn't get it to pass. Everything that doesn't need it was built anyway.",
+            options=STUCK_OPTIONS,
         )
-        self.events.emit("question", id=question["id"], text=question["text"], blocking=True)
-        return "blocked", f"needs your answer: {reason}", None
+        self.events.emit("question", id=question["id"], text=question["text"], blocking=False)
+        return "failed", f"left for you: {why}"
+
+    async def revisit_stuck(self):
+        """At the start of a round: files left for you that pass now are done; your answers take effect."""
+        hub = self.hub
+        for task in hub.tasks():
+            if task["status"] != "failed" or task["kind"] != "build" or task["module"] == "index.html":
+                continue
+            contract = hub.contracts.get(task["module"])
+            if (hub.project / contract["path"]).exists() and (hub.project / contract["test_path"]).exists():
+                passed, _ = await self.runner.run(contract["test_path"])
+                if passed:
+                    hub.mark_done(task["id"], f"{contract['path']} passes its tests now (finished by you)")
+                    self.events.emit("note", text=f"{contract['path']} passes its tests now: marked done")
+                    continue
+            for q in hub.questions():
+                if q["task"] != task["id"] or q["status"] != "answered" or q.get("acted"):
+                    continue
+                hub.mark_acted(q["id"])
+                if q["answer"] != LEFT_FOR_YOU:
+                    hub.restart(task["id"], f"you said: {q['answer']}")
+                    self.events.emit("note", text=f"{contract['path']}: trying again, because you said: {q['answer']}")
 
     # Design (web stack)
 
@@ -727,6 +761,9 @@ class Round:
                 return contract, await self.runner.run(contract["test_path"])
 
         results = await asyncio.gather(*(one(c) for c in built))
+        for c, (ok, _) in results:  # a file left for you that passes now (you finished it) is done
+            if ok and self.hub.task(c["id"])["status"] == "failed":
+                self.hub.mark_done(c["id"], f"{c['path']} passes its tests now (finished by you)")
         failing = [c for c, (ok, _) in results if not ok]
         output = "\n".join(f"{c['test_path']}:\n{out[-600:]}" for c, (ok, out) in results if not ok)
         everything = len(built) == len(self.hub.contracts.all())
@@ -757,71 +794,74 @@ class Round:
         commit(self.hub.project, message)
 
 
-def run_rounds(hub, llm, rounds, echo=None, stop=lambda: False, wait=None):
+def run_rounds(hub, llm, rounds, echo=None, stop=lambda: False):
     """Run up to `rounds` rounds in a row, keeping the Mac awake. Returns (summaries, why it stopped).
 
-    When a round ends with questions that block work, you get a notification and the run
-    waits up to `wait` seconds (the config's `answer_wait` if None; 0 stops instead) for
-    your answers, then takes each question's suggested answer and goes on. It also stops
-    when the planner says the idea is covered and every test passes, when a round makes no
-    progress, or when stop() says so (checked between rounds and while waiting).
+    Nothing stops to ask you: stuck files are left for you and recorded as guesses, and
+    questions pile up for whenever you look. It stops when the planner says the idea is
+    covered and every test passes, when a round makes no progress, or when stop() says so
+    (checked between rounds), and sends one notification saying how it went.
     """
-    wait = hub.local_config()["answer_wait"] if wait is None else wait
-    summaries = []
+    summaries, why = [], f"ran the {rounds} round{'s' if rounds != 1 else ''} asked for"
     with awake():
-        for n in range(rounds):
+        for _ in range(rounds):
             before = sum(t["status"] == "done" for t in hub.tasks())
             summary = asyncio.run(Round(hub, llm, echo=echo).run())
             summaries.append(summary)
             after = sum(t["status"] == "done" for t in hub.tasks())
             todo = any(t["status"] == "todo" for t in hub.tasks())
-            if summary["open_questions"]:
-                if not wait or n == rounds - 1:
-                    return summaries, "some questions need your answer"
-                how = wait_for_answers(hub, summary["open_questions"], wait, stop)
-                if how == "stopped":
-                    return summaries, "you asked it to stop"
-                continue
             if summary["complete"] and not todo and summary["tests_passed"]:
-                return summaries, "the planner says the idea is covered and every test passes"
+                why = "the planner says the idea is covered and every test passes"
+                break
             if after == before and not todo:
-                return summaries, "the last round made no progress"
+                why = "the last round made no progress"
+                break
             if stop():
-                return summaries, "you asked it to stop"
-    return summaries, f"ran the {rounds} round{'s' if rounds != 1 else ''} asked for"
+                why = "you asked it to stop"
+                break
+    notify(run_summary(hub, summaries, why), f"Roughcut Local: {hub.project.name}")
+    return summaries, why
 
 
-def wait_for_answers(hub, question_ids, seconds, stop=lambda: False, poll=2.0):
-    """Wait for blocking questions to be answered. Returns "answered", "timed_out" or "stopped".
+def run_summary(hub, summaries, why):
+    """One line on how a run went, for the notification and the studio's chat."""
+    left = [t["module"] for t in hub.tasks() if t["status"] == "failed" and t["kind"] == "build"]
+    status = hub.status()
+    passed = bool(summaries) and summaries[-1]["tests_passed"]
+    parts = [f"{len(summaries)} round{'s' if len(summaries) != 1 else ''}, stopped because {why}.",
+             "Every test passes." if passed else "Not every test passes yet."]
+    if left:
+        parts.append(f"Left for you: {', '.join(left)}.")
+    if status["guesses_to_confirm"]:
+        parts.append(f"{len(status['guesses_to_confirm'])} guess(es) to look at.")
+    return " ".join(parts)
 
-    On time out, each question still open gets its suggested answer (or its first option),
-    so an overnight run loses minutes, not the night.
-    """
-    events = hub.events
-    texts = [hub.question(q)["text"] for q in question_ids]
-    minutes = max(1, round(seconds / 60))
-    notify(f"{texts[0][:120]} I'll go with my suggestion in {minutes} min unless you answer.", "Roughcut Local needs you")
-    events.emit("waiting", questions=list(question_ids), until=time.time() + seconds)
-    deadline = time.time() + seconds
-    while time.time() < deadline:
-        still = [q for q in question_ids if hub.question(q)["status"] == "open"]
-        if not still:
-            events.emit("waited", how="answered")
-            return "answered"
-        if stop():
-            events.emit("waited", how="stopped")
-            return "stopped"
-        time.sleep(poll)
-    for qid in question_ids:
-        question = hub.question(qid)
-        if question["status"] != "open":
-            continue
-        pick = question.get("suggested") or (question["options"] or ["Simplify it"])[0]
-        hub.answer(qid, pick)
-        events.emit("note", text=f"no answer in {minutes} min to {qid}: went with \"{pick}\"")
-    hub.render()
-    events.emit("waited", how="timed_out")
-    return "timed_out"
+
+def handover_lines(brief, contract, why, failure, stack):
+    """What a file left for you must do, as comment lines."""
+    tail = [l for l in (failure or "").strip().splitlines() if l.strip()][-8:]
+    lines = [HANDOVER, "The models couldn't get this file to pass its tests, so it's yours to finish.", ""]
+    lines += brief.splitlines() + [""]
+    lines += [f"Its tests: {contract['test_path']}   (run: {stack.test_hint(contract['test_path'])})"]
+    lines += [f"Why it's stuck: {why}"]
+    if tail:
+        lines += ["Last failure:"] + [f"  {l[:160]}" for l in tail]
+    lines += ["", "Once its tests pass, the next round marks it done. Delete this note whenever you like.", HANDOVER_END]
+    return lines
+
+
+HANDOVER = "ROUGHCUT: LEFT FOR YOU"
+HANDOVER_END = "END OF ROUGHCUT NOTE"
+
+
+def strip_handover(code):
+    """The code without an earlier hand-over note (first line to last line of it), so notes don't pile up."""
+    lines = code.splitlines()
+    first = next((i for i, l in enumerate(lines) if HANDOVER in l), None)
+    last = next((i for i, l in reversed(list(enumerate(lines))) if HANDOVER_END in l), None)
+    if first is not None and last is not None and last >= first:
+        lines = lines[:first] + lines[last + 1:]
+    return "\n".join(lines).strip() + "\n"
 
 
 def commit(folder, message):

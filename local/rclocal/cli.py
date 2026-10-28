@@ -177,18 +177,18 @@ def walk_questions(hub):
 # Rounds and the app
 
 
-def run_rounds(hub, client, rounds, ui=None, quiet=False, wait=None):
+def run_rounds(hub, client, rounds, ui=None, quiet=False):
     if ui:
         from .status import serve
 
         server = serve(hub, client, ui)
         threading.Thread(target=server.serve_forever, daemon=True).start()
         print(f"Status page: http://127.0.0.1:{ui}", flush=True)
-    summaries, why = rounds_mod.run_rounds(hub, client, rounds, echo=None if quiet else echo,
-                                           wait=None if wait is None else wait * 60)
+    summaries, why = rounds_mod.run_rounds(hub, client, rounds, echo=None if quiet else echo)
     for summary in summaries:
         print(json.dumps(summary, indent=2), flush=True)
-    print(f"Stopped: {why}." + (" Answer with: roughcut-local questions --ask" if "questions" in why else ""), flush=True)
+    print(rounds_mod.run_summary(hub, summaries, why), flush=True)
+    print("Look at the guesses with: roughcut-local questions --ask", flush=True)
     return {"rounds": len(summaries), "stopped": why, "last": summaries[-1] if summaries else None}
 
 
@@ -214,7 +214,7 @@ def serve_app(hub, port=None, open_browser=True):
 
 def finish(hub, client, args):
     """After talking: build, then show the app."""
-    result = run_rounds(hub, client, args.rounds, args.ui, args.quiet, args.wait)
+    result = run_rounds(hub, client, args.rounds, args.ui, args.quiet)
     project.render(hub)
     if not args.no_open:
         serve_app(hub)
@@ -361,7 +361,6 @@ def build_parser():
         p.add_argument("--ui", type=int, nargs="?", const=8765, help="also serve the status page (default port 8765)")
         p.add_argument("--no-open", action="store_true", help="don't open the app when it's built")
         p.add_argument("--quiet", action="store_true")
-        p.add_argument("--wait", type=float, help="minutes to wait for your answer when stuck, then take the suggestion (default 10; 0 stops)")
 
     p = sub.add_parser("new", help="start from an idea: talk it through, build it, open it")
     p.add_argument("idea", nargs="?")
@@ -370,14 +369,14 @@ def build_parser():
     p.add_argument("--stack", choices=sorted(STACKS), default="web")
     p.add_argument("--model", action="append", default=[], help="role=model, e.g. designer=qwen2.5-coder:14b")
     p.add_argument("--no-talk", action="store_true", help="skip the brainstorm and build from the idea as written")
-    building(p, 4)
+    building(p, 6)
 
     p = sub.add_parser("open", help="open a project (folder, name or GitHub URL), talk about changes, build")
     p.add_argument("target")
     p.add_argument("--thoughts", help="what you want changed, instead of being asked")
     p.add_argument("--stack", choices=sorted(STACKS), help="for a project brought in (default: guessed)")
     p.add_argument("--in-place", action="store_true", help="work in a folder brought in, instead of on a copy")
-    building(p, 2)
+    building(p, 4)
 
     sub.add_parser("projects", help="list every project made or opened here")
 
@@ -406,7 +405,6 @@ def build_parser():
     p.add_argument("--rounds", type=int, default=1, help="run up to this many rounds in a row (default 1)")
     p.add_argument("--ui", type=int, nargs="?", const=8765, help="also serve the status page (default port 8765)")
     p.add_argument("--quiet", action="store_true")
-    p.add_argument("--wait", type=float, help="minutes to wait for your answer when stuck, then take the suggestion (default 10; 0 stops)")
 
     p = sub.add_parser("answer", help="answer a question, or change or confirm a guess")
     p.add_argument("id")
@@ -434,7 +432,7 @@ def main(argv=None):
         "init": cmd_init,
         "check": cmd_check,
         "talk": cmd_talk,
-        "round": lambda h, a: run_rounds(h, client_for(h), a.rounds, a.ui, a.quiet, a.wait),
+        "round": lambda h, a: run_rounds(h, client_for(h), a.rounds, a.ui, a.quiet),
         "answer": lambda h, a: h.answer(a.id, a.text, a.keep),
         "redo": lambda h, a: h.retry(a.id, a.reason),
         "questions": cmd_questions,

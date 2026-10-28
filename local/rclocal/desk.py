@@ -29,7 +29,7 @@ from .brainstorm import Brainstorm
 from .hub_local import HubError, LocalHub
 from .llm import LLMError, OllamaClient
 from .protocol import ROLE_JOBS
-from .rounds import run_rounds
+from .rounds import run_rounds, run_summary
 from .runner import Runner, free_port
 from .scheduler import Scheduler
 
@@ -42,8 +42,7 @@ STAGES = [
     ("page", "Design the page", "Built from the kit, checked in Chrome"),
     ("verify", "Check everything", "Every file's tests, and one fix pass"),
     ("try", "Test users", "Three people try the page"),
-    ("wrap", "Report", "What was built, and what needs you"),
-    ("you", "Your answers", "A file is stuck: answer, or it takes the suggestion"),
+    ("wrap", "Report", "What was built, what's left for you, what was guessed"),
 ]
 
 
@@ -171,7 +170,7 @@ class Desk:
 
     def build(self, rounds=None):
         hub = self.need_hub()
-        rounds = rounds or (4 if not hub.contracts.all() else 2)
+        rounds = rounds or (6 if not hub.contracts.all() else 4)
         self.stop_after_round = False
 
         def work():
@@ -182,12 +181,7 @@ class Desk:
             project.set_idea_from_brief(hub, idea)
             summaries, why = run_rounds(hub, self.llm_for(hub), rounds, stop=lambda: self.stop_after_round)
             project.render(hub)
-            last = summaries[-1] if summaries else {}
-            status = hub.status()
-            return (f"Built {len(summaries)} round{'s' if len(summaries) != 1 else ''}; stopped because {why}. "
-                    f"Tests {'pass' if last.get('tests_passed') else 'do not all pass yet'}. "
-                    f"{len(status['open_questions'])} question(s) need you, "
-                    f"{len(status['guesses_to_confirm'])} guess(es) to confirm.")
+            return "Built " + run_summary(hub, summaries, why)
 
         self.post("you", f"Build ({rounds} round{'s' if rounds != 1 else ''} at most)")
         return self.run("building", work)
@@ -285,25 +279,12 @@ class Desk:
         messages.append({"who": who, "text": text, "questions": questions or [], "ts": time.time()})
         self.hub._write_text(self.chat_path(), json.dumps(messages[-200:], indent=2) + "\n")
 
-    def waiting(self):
-        """The blocking questions a run is waiting on, with the deadline, or None."""
-        if not self.hub:
-            return None
-        events = self.hub.events.read(last=400)
-        last = next((e for e in reversed(events) if e["type"] in ("waiting", "waited")), None)
-        if not last or last["type"] == "waited" or not self.busy:
-            return None
-        questions = [self.hub.question(q) for q in last["questions"]]
-        return {"until": last["until"], "questions": [q for q in questions if q["status"] == "open"]}
-
     def stage(self, snapshot=None):
         """Which stage of the cycle is running now, or None when nothing is."""
         if self.busy == "thinking it through":
             return "talk"
         if self.busy != "building" or not snapshot:
             return None
-        if self.waiting():
-            return "you"
         phase = snapshot.get("phase")
         if phase == "build":
             running = [t for t in snapshot.get("tasks", []) if t["status"] == "in_progress"]
@@ -321,6 +302,5 @@ class Desk:
             "pending": [{"index": i, **item} for i, item in enumerate(self.pending)],
             "ready": self.ready,
             "app": self.app[0] if self.app else None,
-            "waiting": self.waiting(),
             "stages": [{"key": k, "name": n, "what": w} for k, n, w in STAGES],
         }

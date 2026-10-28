@@ -378,28 +378,57 @@ class RoundTest(HubCase):
         self.assertTrue(any("You may not read ../../.ssh/id_rsa" in s for s in seen))
         self.assertEqual(self.hub.task("app-report-py")["status"], "done")
 
-    def test_failing_code_is_retried_then_asked_about(self):
+    def test_a_stuck_file_is_left_for_you_and_the_run_goes_on(self):
+        from rclocal.rounds import HANDOVER, LEFT_FOR_YOU
+
         summary = self.run_round(py_script({"app/convert.py": [CONVERT_BAD], "app/report.py": [REPORT_GOOD]}))
         task = self.hub.task("app-convert-py")
-        self.assertEqual(task["status"], "blocked")
-        self.assertEqual(task["attempts"], 3)
-        self.assertEqual(self.statuses()["app-report-py"], "todo")  # waits on convert
-        self.assertEqual(len(summary["open_questions"]), 1)
+        self.assertEqual((task["status"], task["attempts"]), ("failed", 3))
+        self.assertTrue(task["summary"].startswith("left for you"))
+        self.assertEqual(summary["open_questions"], [])  # nothing waits on you
+        left = (self.project / "app/convert.py").read_text()
+        self.assertIn(HANDOVER, left)
+        self.assertIn("def to_celsius(f: float) -> float", left)  # the contract, in the note
+        self.assertIn("python3 -m unittest tests.test_app_convert", left)
+        self.assertIn("return f - 32", left)  # and its best attempt, kept
+        guess = next(q for q in self.hub.questions() if q["task"] == "app-convert-py")
+        self.assertEqual((guess["status"], guess["choice"]), ("decided", LEFT_FOR_YOU))
+        self.assertEqual(self.statuses()["app-report-py"], "todo")  # only what needs it waits
+
+    def test_a_file_you_finish_is_picked_up(self):
+        script = py_script({"app/convert.py": [CONVERT_BAD], "app/report.py": [REPORT_GOOD]})
+        self.run_round(script)
+        (self.project / "app/convert.py").write_text(CONVERT_GOOD)  # you finish it in your editor
+        script.plan = {**script.plan, "files": [], "guesses": []}
+        summary = self.run_round(script)
+        self.assertIn("finished by you", self.hub.task("app-convert-py")["summary"])
+        self.assertTrue(summary["tests_passed"])
+        self.assertEqual(set(self.statuses().values()), {"done"})
+
+    def test_try_again_gives_the_builder_fresh_tries(self):
+        script = py_script({"app/convert.py": [CONVERT_BAD], "app/report.py": [REPORT_GOOD]})
+        self.run_round(script)
+        guess = next(q for q in self.hub.questions() if q["task"] == "app-convert-py")
+        self.hub.answer(guess["id"], "Try again")
+        script.builds["app/convert.py"] = [CONVERT_GOOD]
+        script.plan = {**script.plan, "files": [], "guesses": []}
+        summary = self.run_round(script)
+        self.assertTrue(summary["tests_passed"])
+        self.assertNotIn("LEFT FOR YOU", (self.project / "app/convert.py").read_text())
+        self.assertTrue(self.hub.question(guess["id"])["acted"])
+
+    def test_hand_over_notes_do_not_pile_up(self):
+        from rclocal.rounds import strip_handover
+
+        for stack, code in ((PY, CONVERT_GOOD), (WEB, TIP_GOOD)):
+            note = stack.comment(["ROUGHCUT: LEFT FOR YOU", "a */ b", "", "END OF ROUGHCUT NOTE"])
+            self.assertEqual(strip_handover(note + "\n" + strip_handover(note + code)), code)
+        self.assertNotIn("*/ b", WEB.comment(["ROUGHCUT: LEFT FOR YOU", "a */ b", "END OF ROUGHCUT NOTE"]))
 
     def test_blaming_the_test_rewrites_it(self):
         self.run_round(py_script({"app/convert.py": [CONVERT_BAD], "app/report.py": [REPORT_GOOD]}, verdict="test"))
         self.assertGreaterEqual(self.hub.task("app-convert-py-tests")["attempts"], 2)
         self.assertTrue(any("tests redone" in n for n in self.hub.task("app-convert-py")["notes"]))
-
-    def test_answering_rebuilds_on_the_next_round(self):
-        script = py_script({"app/convert.py": [CONVERT_BAD], "app/report.py": [REPORT_GOOD]})
-        self.run_round(script)
-        self.hub.answer(self.hub.status()["open_questions"][0], text="Use (f - 32) * 5 / 9")
-        script.builds["app/convert.py"] = [CONVERT_GOOD]
-        script.plan = {**script.plan, "files": [], "guesses": []}
-        summary = self.run_round(script)
-        self.assertTrue(summary["tests_passed"])
-        self.assertEqual(set(self.statuses().values()), {"done"})
 
     def test_python_examples_become_a_test_case(self):
         convert = {**CONVERT, "exports": [export("to_celsius", "def to_celsius(f: float) -> float",
@@ -809,32 +838,7 @@ class TrialTest(unittest.TestCase):
         self.assertIn("How do people vote?", detail)
 
 
-class WaitTest(HubCase):
-    def stuck(self):
-        from rclocal.rounds import STUCK_OPTIONS
-
-        self.hub.add_task("app-x-py", "Build app/x.py", "build", "app/x.py")
-        return self.hub.ask("app-x-py", "app/x.py keeps failing", critical=True, options=STUCK_OPTIONS,
-                            suggested=STUCK_OPTIONS[0]["label"])
-
-    def test_a_stuck_file_takes_the_suggestion_when_nobody_answers(self):
-        from rclocal.rounds import wait_for_answers
-
-        q = self.stuck()
-        self.assertEqual(q["options"], ["Simplify it", "Change the contract", "Drop the file"])
-        self.assertIn("do less", q["details"]["Simplify it"])
-        self.assertEqual(wait_for_answers(self.hub, [q["id"]], 0.2, poll=0.05), "timed_out")
-        self.assertEqual(self.hub.question(q["id"])["answer"], "Simplify it")
-        self.assertEqual([e["type"] for e in self.hub.events.read()][-3:], ["waiting", "note", "waited"])
-
-    def test_an_answer_ends_the_wait(self):
-        from rclocal.rounds import wait_for_answers
-
-        q = self.stuck()
-        threading.Timer(0.1, lambda: self.hub.answer(q["id"], "Drop the file")).start()
-        self.assertEqual(wait_for_answers(self.hub, [q["id"]], 5, poll=0.05), "answered")
-        self.assertEqual(self.hub.question(q["id"])["answer"], "Drop the file")
-
+class KeepAwakeTest(HubCase):
     @unittest.skipUnless(sys.platform == "darwin", "caffeinate is macOS only")
     def test_the_mac_is_kept_awake_only_while_building(self):
         from rclocal.notify import awake

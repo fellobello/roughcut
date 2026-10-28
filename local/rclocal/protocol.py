@@ -191,9 +191,6 @@ EVENTS = {
     "note": ("text",),
     "page_fix": ("part", "reason"),
     "user_test": ("persona", "works", "problems"),
-    # A run waiting for your answers (with a deadline), and how the wait ended: answered, timed_out or stopped.
-    "waiting": ("questions", "until"),
-    "waited": ("how",),
 }
 
 

@@ -197,6 +197,12 @@ class Python(Stack):
     test_header = "import unittest"
     example_call, example_returns = "to_celsius(212)", "100.0"
 
+    def comment(self, lines):
+        return "\n".join(f"# {l}".rstrip() for l in lines) + "\n"
+
+    def test_hint(self, test_path):
+        return f"python3 -m unittest {test_path[:-3].replace('/', '.')}"
+
     def example_tests(self, contract):
         """The contract's examples as a test case, added to the end of the tester's file."""
         cases = example_cases(contract)
@@ -281,6 +287,16 @@ class Web(Stack):
 
     test_header = "import { test } from 'node:test';\nimport assert from 'node:assert/strict';"
     example_call, example_returns = "tipFor(100, 15)", "15"
+
+    def comment(self, lines):
+        """A block comment whose first and last lines are the first and last of `lines`."""
+        lines = [l.replace("*/", "* /") for l in lines] or [""]
+        if len(lines) == 1:
+            return f"/* {lines[0]} */\n"
+        return "\n".join([f"/* {lines[0]}"] + [f" * {l}".rstrip() for l in lines[1:-1]] + [f" * {lines[-1]} */"]) + "\n"
+
+    def test_hint(self, test_path):
+        return f"node --test {test_path}"
 
     def example_tests(self, contract):
         """The contract's examples as one test, added to the end of the tester's file."""

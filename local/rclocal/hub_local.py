@@ -49,7 +49,6 @@ DEFAULT_CONFIG = {
     "test_users": 3,  # test users who try each new page (0 turns them off)
     "user_fixes": 2,  # times test users may send the page back, across all rounds
     "brainstorm_turns": 4,  # most back-and-forth turns before building starts
-    "answer_wait": 600,  # seconds a run waits for your answer to a blocking question, then takes the suggestion
     # Longest reply per call kind, in tokens. A model that loses track stops here instead of
     # writing until the call times out.
     "max_tokens": {
@@ -175,18 +174,32 @@ class LocalHub(Hub):
             task.update(status="done", summary=summary)
             self._save_task(task)
 
+    def restart(self, task_id, reason):
+        """Give a task a fresh set of tries next round, with a note saying why."""
+        with self.locked():
+            task = self.task(task_id)
+            task.update(status="todo", attempts=0)
+            task["notes"].append(f"retry: {reason}")
+            self._save_task(task)
+
+    def mark_acted(self, question_id):
+        """Note that a round has acted on this answer, so it isn't acted on twice."""
+        with self.locked():
+            question = self.question(question_id)
+            question["acted"] = True
+            self._write(self.questions_dir / f"{question_id}.json", question)
+
     def note(self, task_id, text):
         with self.locked():
             task = self.task(task_id)
             task["notes"].append(text)
             self._save_task(task)
 
-    def ask(self, owner, text, critical=False, choice=None, why="", options=(), affects=(), suggested=None):
+    def ask(self, owner, text, critical=False, choice=None, why="", options=(), affects=()):
         """Hub.ask, where options may be {label, detail} pairs (protocol.OPTION) as well as plain labels.
 
         Labels are what's stored and shown; details go in the question's "details", for the
-        studio to show on hover. `suggested` is the answer a blocking question gets if
-        nobody answers in time (rounds.wait_for_answers).
+        studio to show on hover.
         """
         labels, details = [], {}
         for option in options:
@@ -199,9 +212,9 @@ class LocalHub(Hub):
             if label and label not in labels:
                 labels.append(label)
         question = super().ask(owner, text, critical, choice, why, labels, affects)
-        if details or suggested:
+        if details:
             with self.locked():
-                question.update(details=details, suggested=suggested)
+                question["details"] = details
                 self._write(self.questions_dir / f"{question['id']}.json", question)
         return question
 

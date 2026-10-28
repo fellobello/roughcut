@@ -9,7 +9,7 @@
   --bg: #f6f6f3; --panel: #ffffff; --panel-2: #f1f1ed; --ink: #1b1b19; --ink-2: #55554f; --ink-3: #8a8a83;
   --line: #e4e3dd; --accent: #3b5bdb; --accent-ink: #fff; --accent-soft: #e8edff; --ok: #1f8a4c; --warn: #b7791f; --bad: #c2361f;
   --tip: #1b1b19; --tip-ink: #f6f6f3;
-  --radius: 12px; --font: "Avenir Next", Avenir, system-ui, -apple-system, "Segoe UI", sans-serif; --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --radius: 45px; --radius-sm: 22px; --font: "Avenir Next", Avenir, system-ui, -apple-system, "Segoe UI", sans-serif; --mono: ui-monospace, "SF Mono", Menlo, monospace;
   --display: Futura, "Century Gothic", "Avenir Next", system-ui, sans-serif;  /* 50s-60s space-age lettering */
   --spring: all 500ms cubic-bezier(0.68, -0.55, 0.265, 1.55) 50ms;  /* overshoots a little, then settles */
   --inset: inset 0 2px 4px rgb(0 0 0 / 14%), inset 0 0 0 1px rgb(0 0 0 / 4%);
@@ -26,13 +26,13 @@
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 var(--font); }
 button, input, select, textarea { font: inherit; color: inherit; }
-.top { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 5; }
+.top { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 10px 12px; background: var(--panel); position: sticky; top: 0; z-index: 5; }
 .top h1 { font-size: 16px; margin: 0; letter-spacing: -.01em; }
 .top .where { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 200px; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { padding: 2px 10px; border-radius: 999px; background: var(--panel-2); color: var(--ink-2); font-size: 12px; white-space: nowrap; }
 .chip.busy { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
-.icon { width: 34px; height: 34px; display: inline-grid; place-items: center; border: 1px solid var(--line); background: var(--panel); border-radius: 9px; cursor: pointer; color: var(--ink-2); }
+.icon { width: 34px; height: 34px; display: inline-grid; place-items: center; border: 1px solid transparent; background: var(--panel-2); border-radius: 999px; cursor: pointer; color: var(--ink-2); }
 .icon:hover { color: var(--ink); border-color: var(--ink-3); }
 .icon.on { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
 .icon svg { width: 18px; height: 18px; }
@@ -43,45 +43,44 @@ body.no-left.no-right .layout { grid-template-columns: 0 minmax(0, 1fr) 0; }
 body.no-left #left, body.no-right #right { display: none; }
 #left { grid-column: 1; } main { grid-column: 2; } #right { grid-column: 3; }  /* each keeps its place when another hides */
 aside { padding: 16px; display: grid; gap: 18px; align-content: start; background: var(--panel); min-width: 0; }
-#left { border-right: 1px solid var(--line); }
-#right { border-left: 1px solid var(--line); }
+
 main { padding: 16px; min-width: 0; }
 h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3); margin: 0 0 8px; }
 .list { display: grid; gap: 4px; }
-.proj { text-align: left; border: 1px solid transparent; background: none; padding: 8px 10px; border-radius: 10px; cursor: pointer; }
+.proj { text-align: left; border: 1px solid transparent; background: none; padding: 8px 14px; border-radius: var(--radius-sm); cursor: pointer; }
 .proj:hover { background: var(--panel-2); }
 .proj.on { border-color: var(--accent); background: var(--accent-soft); }
 .proj small { display: block; color: var(--ink-3); font-size: 12px; }
-.input, textarea, select { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); }
+.input, textarea, select { width: 100%; padding: 9px 14px; border: 1px solid transparent; border-radius: var(--radius-sm); background: var(--panel-2); }
 textarea { resize: vertical; min-height: 64px; }
 .input:focus, textarea:focus, select:focus { outline: none; border-color: var(--accent); }
-.btn { border: 1px solid var(--line); background: var(--panel); padding: 7px 14px; border-radius: 10px; cursor: pointer; font-weight: 600; }
+.btn { border: 1px solid var(--line); background: var(--panel); padding: 7px 16px; border-radius: 999px; cursor: pointer; font-weight: 600; }
 .btn:hover { border-color: var(--ink-3); }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .btn:disabled { opacity: .45; cursor: default; }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .stack { display: grid; gap: 8px; }
-.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 16px; overflow-x: auto; }
+.tabs { display: flex; gap: 4px; margin-bottom: 16px; overflow-x: auto; }
 .tab { border: 0; background: none; padding: 8px 14px; border-bottom: 2px solid transparent; cursor: pointer; color: var(--ink-2); font-weight: 600; white-space: nowrap; }
 .tab.on { color: var(--ink); border-color: var(--accent); }
 .tab .n { background: var(--accent); color: var(--accent-ink); border-radius: 999px; padding: 0 6px; font-size: 11px; margin-left: 4px; }
 .panel { display: none; } .panel.on { display: block; }
-.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; margin-bottom: 12px; min-width: 0; }
+.card { background: var(--panel); border-radius: var(--radius); padding: 22px 26px; margin-bottom: 12px; min-width: 0; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
 .chat { display: grid; gap: 10px; max-height: 50vh; overflow-y: auto; padding: 4px; }
-.msg { max-width: 760px; padding: 10px 14px; border-radius: 14px; white-space: pre-wrap; }
+.msg { max-width: 760px; padding: 10px 16px; border-radius: var(--radius-sm); white-space: pre-wrap; }
 .msg.you { justify-self: end; background: var(--accent); color: var(--accent-ink); border-bottom-right-radius: 4px; }
-.msg.brainstormer { background: var(--panel); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
+.msg.brainstormer { background: var(--panel-2); border-bottom-left-radius: 6px; }
 .msg.desk { background: var(--panel-2); color: var(--ink-2); font-size: 13px; }
 .msg .who { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; opacity: .7; margin-bottom: 2px; }
 
 /* A question, focused: its own box, short answers, the meaning of each on hover. */
-.ask { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 18px; box-shadow: 0 8px 28px rgb(0 0 0 / 8%); margin-bottom: 12px; }
+.ask { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 26px 30px; box-shadow: 0 8px 28px rgb(0 0 0 / 8%); margin-bottom: 12px; }
 .ask .count { font-size: 12px; color: var(--ink-3); text-transform: uppercase; letter-spacing: .06em; }
 .ask h3 { font-size: 17px; margin: 4px 0 4px; line-height: 1.35; }
 .ask .why { color: var(--ink-3); font-size: 13px; margin: 0 0 12px; }
 .opts { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
-.opt { position: relative; border: 1px solid var(--line); background: var(--panel-2); border-radius: 10px; padding: 8px 14px; cursor: pointer; font-weight: 600; }
+.opt { position: relative; border: 1px solid transparent; background: var(--panel-2); border-radius: 999px; padding: 8px 14px; cursor: pointer; font-weight: 600; }
 .opt:hover, .opt:focus-visible { border-color: var(--accent); outline: none; }
 .opt.pick { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 .opt.pick::before { content: "★ "; font-size: 11px; }
@@ -94,15 +93,10 @@ textarea { resize: vertical; min-height: 64px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line); }
 .dot.on { background: var(--accent); }
 
-/* The time-sensitive box: a file is stuck and the run is waiting on you. */
-.urgent { position: fixed; inset: 0; background: rgb(0 0 0 / 45%); display: grid; place-items: center; z-index: 30; padding: 16px; }
-.urgent[hidden] { display: none; }
-.urgent .ask { width: min(560px, 100%); border-color: var(--warn); margin: 0; }
-.clock { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--warn); }
 
 /* The cycle, in the right column. */
 .stages { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
-.stages li { display: grid; grid-template-columns: 24px 1fr; gap: 8px; padding: 8px; border-radius: 10px; color: var(--ink-3); }
+.stages li { display: grid; grid-template-columns: 24px 1fr; gap: 8px; padding: 8px 12px; border-radius: var(--radius-sm); color: var(--ink-3); }
 .stages li b { display: block; color: var(--ink-2); font-weight: 600; }
 .stages li small { font-size: 12px; line-height: 1.35; }
 .stages .n { width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--line); display: grid; place-items: center; font-size: 11px; font-weight: 700; }
@@ -110,8 +104,6 @@ textarea { resize: vertical; min-height: 64px; }
 .stages li.now { background: var(--accent-soft); }
 .stages li.now b { color: var(--accent); }
 .stages li.now .n { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); animation: pulse 1.6s ease-in-out infinite; }
-.stages li.you.now { background: color-mix(in srgb, var(--warn) 15%, transparent); }
-.stages li.you.now b { color: var(--warn); } .stages li.you.now .n { background: var(--warn); border-color: var(--warn); }
 @keyframes pulse { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 25%, transparent); } }
 @media (prefers-reduced-motion: reduce) { .stages li.now .n { animation: none; } }
 
@@ -170,18 +162,17 @@ h1 { letter-spacing: .02em; } h2, .ask .count, .msg .who, th { letter-spacing: .
       <button class="btn primary" id="newBtn">Start</button></div>
   </section>
   <section class="stack">
-    <h2>Open a folder or GitHub repo</h2>
-    <input class="input" id="target" placeholder="~/code/my-app or https://github.com/you/app">
-    <button class="btn" id="openBtn">Open</button>
+    <h2>Work on existing code</h2>
+    <input class="input" id="target" placeholder="A folder (~/code/my-app) or a GitHub link">
+    <button class="btn" id="openBtn">Open it here</button>
     <span class="muted" style="font-size:12px">Folders from elsewhere are copied first, so yours stays as it is.</span>
   </section>
   <div class="error" id="error"></div>
 </aside>
 <main>
   <div class="tabs" id="tabs">
-    <button class="tab on" data-tab="talk">Talk</button>
-    <button class="tab" data-tab="build">Build</button>
-    <button class="tab" data-tab="questions">Questions<span class="n" id="qn" hidden></span></button>
+    <button class="tab on" data-tab="talk">Talk<span class="n" id="qn" hidden></span></button>
+    <button class="tab" data-tab="build">Progress</button>
     <button class="tab" data-tab="app">App</button>
     <button class="tab" data-tab="models">Models</button>
   </div>
@@ -189,6 +180,7 @@ h1 { letter-spacing: .02em; } h2, .ask .count, .msg .who, th { letter-spacing: .
   <section class="panel on" id="talk">
     <div class="card"><div class="chat" id="chat"></div></div>
     <div id="pending"></div>
+    <div id="qbox"></div>
     <div class="card stack">
       <textarea id="say" placeholder="Talk it through: what it's for, who uses it, what to leave out… (Enter sends, Shift+Enter for a new line)"></textarea>
       <div class="row">
@@ -214,10 +206,6 @@ h1 { letter-spacing: .02em; } h2, .ask .count, .msg .who, th { letter-spacing: .
     </div>
   </section>
 
-  <section class="panel" id="questions">
-    <div id="qbox"></div>
-    <p class="muted" style="font-size:13px">★ is what the models picked so work didn't wait. Hover an answer to see what it means. Changing a pick rebuilds what was built on it, next round.</p>
-  </section>
 
   <section class="panel" id="app">
     <div class="row" style="margin-bottom:12px"><button class="btn primary" id="appBtn">Open the app here</button><a id="appLink" target="_blank" rel="noopener"></a></div>
@@ -243,14 +231,13 @@ h1 { letter-spacing: .02em; } h2, .ask .count, .msg .who, th { letter-spacing: .
 </aside>
 </div>
 
-<div class="urgent" id="urgent" hidden role="dialog" aria-modal="true" aria-labelledby="urgentTitle"></div>
 
 <script>
 const TOKEN = "__TOKEN__";
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const gb = b => (b / 2 ** 30).toFixed(1) + " GB";
-let state = null, modelsLoaded = false, lastChat = -1, qIndex = 0, hiddenUrgent = "";
+let state = null, modelsLoaded = false, lastChat = -1, qIndex = 0;
 const drawn = {};
 // Redraw a section only when its data changed, so typing in it isn't wiped.
 const changed = (key, data) => { const j = JSON.stringify(data); if (drawn[key] === j) return false; drawn[key] = j; return true; };
@@ -382,8 +369,9 @@ function buildPanel(s) {
 function questionTab(s) {
   const qs = s.questions;
   $("qn").hidden = !qs.length; $("qn").textContent = qs.length;
-  if (!changed("questions", [qs, qIndex])) return;
-  if (!qs.length) { $("qbox").innerHTML = '<div class="empty">Nothing needs you right now.</div>'; return; }
+  const talking = s.pending.some(p => p.answer === null);  // the brainstormer's questions come first
+  if (!changed("questions", [qs, qIndex, talking])) return;
+  if (!qs.length || talking) { $("qbox").innerHTML = ""; return; }
   qIndex = Math.min(qIndex, qs.length - 1);
   const q = qs[qIndex];
   const options = [...new Set([q.choice, ...q.options].filter(Boolean))];
@@ -391,30 +379,12 @@ function questionTab(s) {
     ${qs.map((_, i) => `<span class="dot ${i === qIndex ? "on" : ""}"></span>`).join("")}
     <button class="btn" data-nav="1" ${qIndex < qs.length - 1 ? "" : "disabled"}>›</button>
     <span class="muted mono" style="margin-left:auto">${esc(q.id)} · ${q.status === "open" ? "blocks work" : "a guess"}</span></div>`;
-  $("qbox").innerHTML = askBox({ id: q.id, count: `${qIndex + 1} of ${qs.length}${q.status === "open" ? " · needs you" : ""}`, title: q.text,
-    why: q.why, options, details: q.details || {}, pick: q.choice || q.suggested, extra: nav });
+  $("qbox").innerHTML = askBox({ id: q.id, count: `From the builds · ${qIndex + 1} of ${qs.length}`, title: q.text,
+    why: q.why, options, details: q.details || {}, pick: q.choice, extra: nav });
   wireAsk($("qbox"), (id, value, isPick) => post("question", isPick && q.choice ? { id, keep: true } : { id, text: value }));
   $("qbox").querySelectorAll("[data-nav]").forEach(b => b.onclick = () => { qIndex += Number(b.dataset.nav); drawn.questions = ""; questionTab(state); });
 }
 
-// A run is waiting on you: a box in front of everything, with the time left.
-function urgent(s) {
-  const w = s.waiting, box = $("urgent");
-  const q = w && w.questions[0];
-  if (!q || hiddenUrgent === q.id) { box.hidden = true; drawn.urgent = ""; return; }
-  box.hidden = false;
-  const left = Math.max(0, Math.round(w.until - Date.now() / 1000));
-  const clock = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
-  const pick = q.suggested || q.options[0];
-  if (changed("urgent", q.id)) {
-    box.innerHTML = askBox({ id: q.id, count: "A file is stuck", title: { text: q.text, id: "urgentTitle" }, options: q.options, details: q.details || {}, pick,
-      extra: `<p class="muted" style="margin:12px 0 0">Going with <strong>${esc(pick)}</strong> in <span class="clock" id="clock">${clock}</span> unless you answer.
-        <button class="btn" id="laterBtn" style="margin-left:8px">Hide</button></p>` });
-    wireAsk(box, (id, text) => post("question", { id, text }));
-    $("laterBtn").onclick = () => { hiddenUrgent = q.id; box.hidden = true; };
-  }
-  $("clock") && ($("clock").textContent = clock);
-}
 
 function cycle(s) {
   const keys = s.stages.map(x => x.key);
@@ -459,16 +429,10 @@ async function refresh() {
   state = s;
   try {
     $("where").textContent = s.project ? `${s.project.name} · ${s.project.path}` : "No project open";
-    chips(s); projectList(s); talk(s); buildPanel(s); questionTab(s); appPanel(s); cycle(s); urgent(s);
+    chips(s); projectList(s); talk(s); buildPanel(s); questionTab(s); appPanel(s); cycle(s);
   } catch (e) { $("where").textContent = "Display error: " + e; console.error(e); }
 }
 refresh(); setInterval(refresh, 2000);
-setInterval(() => {  // the countdown ticks every second between refreshes
-  const w = state && state.waiting, c = $("clock");
-  if (!w || !c) return;
-  const left = Math.max(0, Math.round(w.until - Date.now() / 1000));
-  c.textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
-}, 1000);
 </script>
 </body>
 </html>
