@@ -40,10 +40,12 @@ MAX_DECISIONS = 2  # per task; small models over-report
 MAX_GUESSES = 3  # per plan, so the questions you get are few and real
 # What you can say about a file the models got stuck on. Nothing waits for your answer:
 # the file is left for you, and the run goes on with everything else.
-LEFT_FOR_YOU = "Left for you"
+# The answers are your replies, so they're in your voice.
+I_GOT_IT = "I got it"
+KEEP_ANSWERS = {I_GOT_IT, "Left for you"}  # "Left for you" is what earlier versions wrote
 STUCK_OPTIONS = [
-    {"label": LEFT_FOR_YOU, "detail": "It keeps its best attempt, with a comment at the top saying what's missing. "
-                                      "Finish it in any editor; once its tests pass, the next round picks it up."},
+    {"label": I_GOT_IT, "detail": "You'll finish it yourself. It keeps its best attempt, with a note at the top saying "
+                                  "what's missing; once its tests pass, the next round picks it up."},
     {"label": "Try again", "detail": "The builder gets a fresh set of tries next round, with what you say here."},
     {"label": "Simplify it", "detail": "The planner trims what this file promises next round, then it's built again."},
 ]
@@ -613,7 +615,7 @@ class Round:
         body = strip_handover(code) if code else self.stack.comment(["Nothing here yet."])
         hub._write_text(hub.project / path, note + "\n" + body)
         question = hub.ask(
-            task["id"], f"{path} is left for you: {why}", critical=True, choice=LEFT_FOR_YOU,
+            task["id"], f"{path} is left for you: {why}", critical=True, choice=I_GOT_IT,
             why="The models couldn't get it to pass. Everything that doesn't need it was built anyway.",
             options=STUCK_OPTIONS,
         )
@@ -637,7 +639,7 @@ class Round:
                 if q["task"] != task["id"] or q["status"] != "answered" or q.get("acted"):
                     continue
                 hub.mark_acted(q["id"])
-                if q["answer"] != LEFT_FOR_YOU:
+                if q["answer"] not in KEEP_ANSWERS:
                     hub.restart(task["id"], f"you said: {q['answer']}")
                     self.events.emit("note", text=f"{contract['path']}: trying again, because you said: {q['answer']}")
 

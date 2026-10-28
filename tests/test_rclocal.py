@@ -380,7 +380,7 @@ class RoundTest(HubCase):
         self.assertEqual(self.hub.task("app-report-py")["status"], "done")
 
     def test_a_stuck_file_is_left_for_you_and_the_run_goes_on(self):
-        from rclocal.rounds import HANDOVER, LEFT_FOR_YOU
+        from rclocal.rounds import HANDOVER, I_GOT_IT
 
         summary = self.run_round(py_script({"app/convert.py": [CONVERT_BAD], "app/report.py": [REPORT_GOOD]}))
         task = self.hub.task("app-convert-py")
@@ -393,7 +393,7 @@ class RoundTest(HubCase):
         self.assertIn("python3 -m unittest tests.test_app_convert", left)
         self.assertIn("return f - 32", left)  # and its best attempt, kept
         guess = next(q for q in self.hub.questions() if q["task"] == "app-convert-py")
-        self.assertEqual((guess["status"], guess["choice"]), ("decided", LEFT_FOR_YOU))
+        self.assertEqual((guess["status"], guess["choice"]), ("decided", I_GOT_IT))
         self.assertEqual(self.statuses()["app-report-py"], "todo")  # only what needs it waits
 
     def test_a_file_you_finish_is_picked_up(self):
