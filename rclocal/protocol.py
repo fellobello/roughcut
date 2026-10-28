@@ -64,6 +64,10 @@ DECISION = _obj(["text", "choice", "why"], text=STR, choice=STR, why=STR)
 # A builder asking for something another file doesn't export yet. Additive only.
 CONTRACT_REQUEST = _obj(["path", "add_exports", "why"], path=STR, add_exports=_list(EXPORT), why=STR)
 
+# A stuck file broken into smaller ones. The file keeps its contract and will import the
+# pieces; each piece is a file of its own, with its own contract, examples and tests.
+SPLIT = _obj(["why", "pieces"], why=STR, pieces=_list(FILE_PLAN))
+
 # Reply schemas, one per agent role.
 PLAN = _obj(
     ["name", "summary", "files", "conventions", "guesses", "complete"],
@@ -146,6 +150,7 @@ STEP = _obj(
 REPLIES = {
     "brainstorm": BRAINSTORM,
     "planner": PLAN,
+    "split": SPLIT,
     "survey": FILE_PLAN,
     "step": STEP,
     "notes": NOTES,
@@ -160,7 +165,7 @@ CODE_STOP = "\n```"  # the closing fence of a code reply
 # Every role, with its one job. Each picks a model in local.json.
 ROLE_JOBS = {
     "brainstormer": "talks the idea through with you before anything is built: pushes back, asks up to 3 questions a turn",
-    "planner": "turns the brief into files and their contracts",
+    "planner": "turns the brief into files and their contracts, and splits a file the builder can't get right",
     "surveyor": "reads an existing project's files and writes a contract for each",
     "tester": "writes one file's tests from its contract alone, never seeing the code",
     "builder": "owns one file and works in steps until its tests pass",
@@ -191,6 +196,7 @@ EVENTS = {
     "note": ("text",),
     "page_fix": ("part", "reason"),
     "user_test": ("persona", "works", "problems"),
+    "split": ("path", "pieces", "why"),
 }
 
 

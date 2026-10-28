@@ -62,6 +62,8 @@ def echo(event):
         line = f"   GUARD  {event['path']}: {event['problems']}"
     elif t == "page_fix":
         line = f"   page   fixing only the {event['part']}: {event['reason'][:160]}"
+    elif t == "split":
+        line = f"   split  {event['path']} into {', '.join(event['pieces'])}: {event['why'][:120]}"
     elif t == "user_test":
         line = f"   user   {event['persona']}: {'works' if event['works'] else '; '.join(event['problems'])[:200]}"
     elif t in ("note", "contract") or (t == "question" and event["blocking"]):

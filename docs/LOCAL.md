@@ -34,8 +34,8 @@ one, or bring in existing code from a folder or GitHub repo) and four tabs:
 - **Talk**: chat with the brainstormer. Its questions come up one at a time in their own box,
   each answer 2 or 3 words, with what it means when you hover over it; ★ marks its pick.
   Type your own answer instead, or press Keep talking to take its picks. Build starts the rounds.
-  Once it has built, the guesses it made and the files it left for you show up here too, one
-  at a time: one click keeps or changes each.
+  Once it has built, the guesses it made and the files it left for you come up in the chat
+  too, one at a time: the swarm asks on the left, and you answer in the box on the right.
 - **Progress**: the round as it runs: tasks, model calls, speed, what happened. Stop after this round.
 - **App**: the app running inside the page, and every screenshot from the rounds and test users.
 - **Models**: whether Ollama answers, what's installed, and a model per role (changes are
@@ -45,8 +45,16 @@ The projects column (left) and the cycle column (right) open and close with the 
 the top corners. The cycle lists the stages of a round (talk, plan, build files, design the
 page, check everything, test users, report) and lights up the one running.
 
-**Nothing stops to ask you.** Like the Claude version, a run guesses and keeps going. When
-the models can't get a file to pass, it's **left for you**: the file keeps its best attempt,
+**Nothing stops to ask you.** Like the Claude version, a run guesses and keeps going.
+
+**A file the builder keeps getting wrong is split.** After two failed attempts where the
+reviewer blames the code (or the same tests failing the same way twice), the planner breaks
+the file into 2 to 4 smaller files in a folder next to it (`app/board_parts/neighbors.js`),
+each with its own contract, examples, tests and builder. The file keeps its contract and its
+tests and is rebuilt as a thin file that imports the pieces, so nothing that uses it changes.
+A file is split only once, and a piece is never split again.
+
+When the models still can't get a file to pass, it's **left for you**: the file keeps its best attempt,
 with a note at the top saying what it must do (its contract and examples), how it's tested
 and why they got stuck, and everything that doesn't need it is built anyway. Finish it in
 any editor; once its tests pass, the next round marks it done. Or answer its guess with

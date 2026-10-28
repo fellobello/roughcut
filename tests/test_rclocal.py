@@ -118,10 +118,11 @@ class Script:
     """A fake team. Builders are agents: they always choose to write, and each write
     returns the next version of their file from `builds` (the last one repeats)."""
 
-    def __init__(self, builds, tests, plan, verdict="code", steps=None):
+    def __init__(self, builds, tests, plan, verdict="code", steps=None, split=None):
         self.builds = builds
         self.tests = tests
         self.plan = plan
+        self.split = split or {"why": "", "pieces": []}  # no pieces: the file can't be split, so it's left for you
         self.verdict = verdict
         self.steps = steps or {}  # path -> list of actions to take before writing
         self.tries = {}
@@ -132,7 +133,7 @@ class Script:
 
     def __call__(self, role, model, system, user, schema):
         if role == "planner":
-            return self.plan
+            return self.split if schema is protocol.SPLIT else self.plan
         if role == "tester":
             return "```\n" + self.tests[re.search(r"## Write\n(\S+)", user).group(1)] + "\n```\nDone."
         if role == "builder" and schema is protocol.STEP:
@@ -195,7 +196,7 @@ class ProtocolTest(unittest.TestCase):
     def test_every_role_replies_with_data_or_code(self):
         data_roles = {"brainstormer", "planner", "surveyor", "user", "reviewer", "reporter"}
         self.assertEqual(set(protocol.ROLES), data_roles | set(protocol.CODE_ROLES))
-        kinds = {"brainstorm", "planner", "survey", "step", "notes", "page_part", "user_plan", "user_verdict",
+        kinds = {"brainstorm", "planner", "split", "survey", "step", "notes", "page_part", "user_plan", "user_verdict",
                  "reviewer", "reporter"}
         self.assertEqual(kinds, set(protocol.REPLIES))
         self.assertTrue(all(protocol.ROLE_JOBS.values()))
@@ -416,6 +417,34 @@ class RoundTest(HubCase):
         self.assertTrue(summary["tests_passed"])
         self.assertNotIn("LEFT FOR YOU", (self.project / "app/convert.py").read_text())
         self.assertTrue(self.hub.question(guess["id"])["acted"])
+
+    def test_a_file_that_keeps_failing_is_split_into_smaller_ones(self):
+        from rclocal.rounds import failure_signature
+
+        halves = {"why": "two jobs at once", "pieces": [
+            {"path": "app/convert_parts/offset.py", "purpose": "Remove the offset", "imports": [],
+             "exports": [export("minus_32", "def minus_32(f: float) -> float", examples=[{"call": "minus_32(212)", "returns": "180"}])]},
+            {"path": "convert_parts/scale.py", "purpose": "Scale to Celsius", "imports": ["app/convert_parts/offset.py"],
+             "exports": [export("scale", "def scale(x: float) -> float", examples=[{"call": "scale(180)", "returns": "100.0"}])]},
+        ]}
+        # two full attempts of bad writes (3 steps each in these tests), then good once it's built from pieces
+        builds = {"app/convert.py": [CONVERT_BAD] * 6 + [CONVERT_GOOD], "app/report.py": [REPORT_GOOD],
+                  "app/convert_parts/offset.py": ["def minus_32(f: float) -> float:\n    return f - 32\n"],
+                  "app/convert_parts/scale.py": ["def scale(x: float) -> float:\n    return x * 5 / 9\n"]}
+        tests = {**PY_TESTS,
+                 "tests/test_app_convert_parts_offset.py": "import unittest\nfrom app.convert_parts.offset import minus_32\n\nclass T(unittest.TestCase):\n    def test_a(self):\n        self.assertEqual(minus_32(32), 0)\n",
+                 "tests/test_app_convert_parts_scale.py": "import unittest\nfrom app.convert_parts.scale import scale\n\nclass T(unittest.TestCase):\n    def test_a(self):\n        self.assertEqual(scale(0), 0)\n"}
+        events = []
+        summary = self.run_round(Script(builds, tests, plan_of([CONVERT, REPORT]), split=halves), echo=events.append)
+        split = [e for e in events if e["type"] == "split"]
+        self.assertEqual(split[0]["pieces"], ["app/convert_parts/offset.py", "app/convert_parts/scale.py"])
+        contract = self.hub.contracts.get("app/convert.py")
+        self.assertEqual(contract["split_into"], ["app/convert_parts/offset.py", "app/convert_parts/scale.py"])
+        self.assertEqual(self.hub.contracts.get("app/convert_parts/scale.py")["split_from"], "app/convert.py")
+        self.assertEqual(self.hub.contracts.get("app/convert_parts/scale.py")["imports"], ["app/convert_parts/offset.py"])
+        self.assertTrue(summary["tests_passed"])  # the pieces were built, then the file again, from them
+        self.assertEqual(set(self.statuses().values()), {"done"})
+        self.assertEqual(failure_signature("✖ to_celsius rounds (1.2ms)\nnoise\n✖ freezing"), "freezing; to_celsius rounds")
 
     def test_hand_over_notes_do_not_pile_up(self):
         from rclocal.rounds import strip_handover

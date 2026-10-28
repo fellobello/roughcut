@@ -100,6 +100,19 @@ class Contracts:
             self._bump(contract, round_no, reason)
             return contract, [e["name"] for e in added]
 
+    def remove(self, path):
+        """Forget a contract (a piece of a split that didn't come together)."""
+        with self.hub.locked():
+            self._path(path).unlink(missing_ok=True)
+
+    def mark(self, path, **fields):
+        """Keep facts about a file next to its contract (like which file it was split from). No new version."""
+        with self.hub.locked():
+            contract = self.get(path)
+            contract.update(fields)
+            self.hub._write(self._path(path), contract)
+            return contract
+
     def set_imports(self, path, imports, round_no, reason):
         with self.hub.locked():
             contract = self.get(path)

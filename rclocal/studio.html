@@ -67,25 +67,32 @@ textarea { resize: vertical; min-height: 64px; }
 .panel { display: none; } .panel.on { display: block; }
 .card { background: var(--panel); border-radius: var(--radius); padding: 22px 26px; margin-bottom: 12px; min-width: 0; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
-.chat { display: grid; gap: 10px; max-height: 50vh; overflow-y: auto; padding: 4px; }
+.chat { max-height: 58vh; overflow-y: auto; padding: 4px; }
+.chatlog { display: grid; gap: 10px; }
+#asking:not(:empty) { margin-top: 10px; }
+.msg.swarm { background: var(--panel-2); border-bottom-left-radius: 6px; max-width: 66%; }
+.msg.swarm .why { color: var(--ink-3); font-size: 13px; margin-top: 4px; }
+.reply { justify-self: end; width: min(66%, 520px); background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius-sm); border-bottom-right-radius: 6px; padding: 12px 14px; box-shadow: var(--bevel); }
+.reply .opts { margin: 0 0 10px; justify-content: flex-end; }
+.reply .row { flex-wrap: nowrap; }
+.reply .count { font-size: 11px; color: var(--ink-3); text-align: right; margin-bottom: 8px; letter-spacing: .14em; text-transform: uppercase; font-family: var(--display); }
+.qnav { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
+.qnav .btn { padding: 2px 10px; }
 .msg { max-width: 760px; padding: 10px 16px; border-radius: var(--radius-sm); white-space: pre-wrap; }
 .msg.you { justify-self: end; background: var(--accent); color: var(--accent-ink); border-bottom-right-radius: 4px; }
 .msg.brainstormer { background: var(--panel-2); border-bottom-left-radius: 6px; }
 .msg.desk { background: var(--panel-2); color: var(--ink-2); font-size: 13px; }
 .msg .who { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; opacity: .7; margin-bottom: 2px; }
 
-/* A question, focused: its own box, short answers, the meaning of each on hover. */
-.ask { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 26px 30px; box-shadow: 0 8px 28px rgb(0 0 0 / 8%); margin-bottom: 12px; }
-.ask .count { font-size: 12px; color: var(--ink-3); text-transform: uppercase; letter-spacing: .06em; }
-.ask h3 { font-size: 17px; margin: 4px 0 4px; line-height: 1.35; }
-.ask .why { color: var(--ink-3); font-size: 13px; margin: 0 0 12px; }
+/* Answer options: short labels, the meaning of each on hover. */
 .opts { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
 .opt { position: relative; border: 1px solid transparent; background: var(--panel-2); border-radius: 999px; padding: 8px 14px; cursor: pointer; font-weight: 600; }
 .opt:hover, .opt:focus-visible { border-color: var(--accent); outline: none; }
 .opt.pick { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 .opt.pick::before { content: "★ "; font-size: 11px; }
 .opt[data-detail]:hover::after, .opt[data-detail]:focus-visible::after {
-  content: attr(data-detail); position: absolute; left: 0; top: calc(100% + 6px); width: max-content; max-width: 280px;
+  content: attr(data-detail); position: absolute; right: 0; top: calc(100% + 6px); width: max-content; max-width: 280px;
   background: var(--tip); color: var(--tip-ink); padding: 8px 10px; border-radius: 8px; font-weight: 400; font-size: 13px;
   line-height: 1.4; z-index: 20; box-shadow: 0 6px 20px rgb(0 0 0 / 20%); white-space: normal; pointer-events: none; }
 .answered { color: var(--ok); font-weight: 600; }
@@ -121,15 +128,14 @@ iframe { width: 100%; height: 70vh; border: 1px solid var(--line); border-radius
 .ok { color: var(--ok); } .bad { color: var(--bad); }
 .soon { border: 1px dashed var(--line); border-radius: var(--radius); padding: 14px; color: var(--ink-3); }
 /* Retro: Futura for anything that names or labels, a spring on anything you can press, and pressed-in fields. */
-h1, h2, h3, .tab, .btn, .opt, .chip, .big, .stages b, .ask .count, .proj, .msg .who, th, label { font-family: var(--display); }
-h1 { letter-spacing: .02em; } h2, .ask .count, .msg .who, th { letter-spacing: .14em; }
-.btn, .opt, .tab, .proj, .icon, .chip, .stages li, .card, .ask, .input, textarea, select { transition: var(--spring); }
+h1, h2, h3, .tab, .btn, .opt, .chip, .big, .stages b, .proj, .msg .who, th, label { font-family: var(--display); }
+h1 { letter-spacing: .02em; } h2, .msg .who, th { letter-spacing: .14em; }
+.btn, .opt, .tab, .proj, .icon, .chip, .stages li, .card, .reply, .input, textarea, select { transition: var(--spring); }
 .btn:hover:not(:disabled), .opt:hover, .proj:hover, .icon:hover { transform: translateY(-2px); }
 .btn:active:not(:disabled), .opt:active, .proj:active, .icon:active { transform: translateY(1px); box-shadow: var(--inset); }
 .input, textarea, select { box-shadow: var(--inset); }
 .input:focus, textarea:focus, select:focus { box-shadow: var(--inset), 0 0 0 3px var(--accent-soft); }
-.card, .ask, aside, .top, .btn, .icon { box-shadow: var(--bevel); }
-.ask { box-shadow: var(--bevel), 0 8px 28px rgb(0 0 0 / 8%); }
+.card, aside, .top, .btn, .icon { box-shadow: var(--bevel); }
 .chip, .stages .n, .dot { box-shadow: var(--inset); }
 .opt { box-shadow: var(--bevel); } .opt.pick { box-shadow: var(--inset); }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
@@ -178,9 +184,7 @@ h1 { letter-spacing: .02em; } h2, .ask .count, .msg .who, th { letter-spacing: .
   </div>
 
   <section class="panel on" id="talk">
-    <div class="card"><div class="chat" id="chat"></div></div>
-    <div id="pending"></div>
-    <div id="qbox"></div>
+    <div class="card"><div class="chat" id="chatbox"><div class="chatlog" id="chat"></div><div class="chatlog" id="asking"></div></div></div>
     <div class="card stack">
       <textarea id="say" placeholder="Talk it through: what it's for, who uses it, what to leave out… (Enter sends, Shift+Enter for a new line)"></textarea>
       <div class="row">
@@ -282,15 +286,7 @@ $("appBtn").onclick = () => post("app").then(d => {
   $("appLink").href = d.url; $("appLink").textContent = "Open in a new tab ↗";
 });
 
-// One question in its own box. answer(value) is called with the label picked or typed.
-function askBox({ count, title, why, options, details = {}, pick, extra = "", id }) {
-  return `<div class="ask" data-ask="${esc(id)}">
-    ${count ? `<div class="count">${esc(count)}</div>` : ""}
-    <h3 ${title.id ? `id="${title.id}"` : ""}>${esc(title.text || title)}</h3>${why ? `<p class="why">${esc(why)}</p>` : ""}
-    <div class="opts">${options.map(o => `<button class="opt ${o === pick ? "pick" : ""}" data-value="${esc(o)}" ${details[o] ? `data-detail="${esc(details[o])}"` : ""}>${esc(o)}</button>`).join("")}</div>
-    <div class="row"><input class="input" style="flex:1" placeholder="Something else? Type your own answer" data-own><button class="btn" data-ownbtn>Answer</button></div>
-    ${extra}</div>`;
-}
+// Answers to the question being asked: an option clicked, or your own words.
 function wireAsk(root, answer) {
   root.querySelectorAll("[data-ask]").forEach(box => {
     box.querySelectorAll(".opt").forEach(b => b.onclick = () => answer(box.dataset.ask, b.dataset.value, b.classList.contains("pick")));
@@ -324,16 +320,8 @@ function talk(s) {
     $("chat").innerHTML = chat.length ? chat.map(m =>
       `<div class="msg ${esc(m.who)}"><div class="who">${esc(m.who === "you" ? "You" : m.who)}</div>${esc(m.text)}</div>`).join("")
       : `<div class="empty">${s.project ? "Say what you'd like to build or change." : "Pick a project on the left, or start a new one."}</div>`;
-    $("chat").scrollTop = $("chat").scrollHeight;
+    $("chatbox").scrollTop = $("chatbox").scrollHeight;
     lastChat = chat.length;
-  }
-  if (changed("pending", s.pending)) {
-    const open = s.pending.filter(p => p.answer === null);
-    const done = s.pending.filter(p => p.answer !== null);
-    $("pending").innerHTML = done.map(p => `<div class="card"><strong>${esc(p.question.text)}</strong> <span class="answered">→ ${esc(p.answer)}</span></div>`).join("")
-      + (open.length ? askBox({ id: open[0].index, count: `Question ${done.length + 1} of ${s.pending.length}`, title: open[0].question.text,
-          why: open[0].question.why, options: open[0].question.options, details: open[0].question.details || {}, pick: open[0].question.default }) : "");
-    wireAsk($("pending"), (index, reply) => post("answer", { index, reply }));
   }
   const off = !s.project || !!s.busy;
   ["sayBtn", "buildBtn", "buildBtn2"].forEach(id => $(id).disabled = off);
@@ -357,8 +345,8 @@ function buildPanel(s) {
     tests: e => `tests ${e.target}: ${e.passed ? "pass" : "fail"}`, contract: e => `contract ${e.path} v${e.version}`,
     question: e => `${e.blocking ? "question" : "decision"}: ${e.text}`, agent_step: e => `${e.task} step ${e.step}: ${e.action}`,
     blocked_code: e => `guard blocked ${e.path}`, page_fix: e => `page: fixing only the ${e.part}`,
+    split: e => `split ${e.path} into ${(e.pieces || []).join(", ")}`,
     user_test: e => `test user ${e.persona}: ${e.works ? "it works" : (e.problems || []).join("; ")}`, note: e => e.text,
-    waiting: e => "waiting for your answer", waited: e => `waited: ${e.how.replace("_", " ")}`,
     round_start: e => "round started", round_end: e => "round finished",
   };
   if (changed("log", st.events.length && st.events[st.events.length - 1].ts))
@@ -366,23 +354,34 @@ function buildPanel(s) {
       `<div><span class="muted">${new Date(e.ts * 1000).toLocaleTimeString()}</span> ${esc((say[e.type] || (x => x.type))(e))}</div>`).join("") || '<span class="muted">Nothing yet.</span>';
 }
 
-function questionTab(s) {
-  const qs = s.questions;
-  $("qn").hidden = !qs.length; $("qn").textContent = qs.length;
-  const talking = s.pending.some(p => p.answer === null);  // the brainstormer's questions come first
-  if (!changed("questions", [qs, qIndex, talking])) return;
-  if (!qs.length || talking) { $("qbox").innerHTML = ""; return; }
-  qIndex = Math.min(qIndex, qs.length - 1);
-  const q = qs[qIndex];
-  const options = [...new Set([q.choice, ...q.options].filter(Boolean))];
-  const nav = `<div class="steps"><button class="btn" data-nav="-1" ${qIndex ? "" : "disabled"}>‹</button>
-    ${qs.map((_, i) => `<span class="dot ${i === qIndex ? "on" : ""}"></span>`).join("")}
-    <button class="btn" data-nav="1" ${qIndex < qs.length - 1 ? "" : "disabled"}>›</button>
-    <span class="muted mono" style="margin-left:auto">${esc(q.id)} · ${q.status === "open" ? "blocks work" : "a guess"}</span></div>`;
-  $("qbox").innerHTML = askBox({ id: q.id, count: `From the builds · ${qIndex + 1} of ${qs.length}`, title: q.text,
-    why: q.why, options, details: q.details || {}, pick: q.choice, extra: nav });
-  wireAsk($("qbox"), (id, value, isPick) => post("question", isPick && q.choice ? { id, keep: true } : { id, text: value }));
-  $("qbox").querySelectorAll("[data-nav]").forEach(b => b.onclick = () => { qIndex += Number(b.dataset.nav); drawn.questions = ""; questionTab(state); });
+// The question being asked, at the end of the chat: the swarm asks on the left, your
+// answer box is on the right. The brainstormer's questions come first, then the builds'.
+function asking(s) {
+  const open = s.pending.filter(p => p.answer === null), qs = s.questions;
+  $("qn").hidden = !(open.length + qs.length); $("qn").textContent = open.length + qs.length;
+  let q = null;
+  if (open.length) {
+    const p = open[0];
+    q = { kind: "talk", id: p.index, text: p.question.text, why: p.question.why, options: p.question.options,
+          details: p.question.details || {}, pick: p.question.default, count: `Question ${s.pending.length - open.length + 1} of ${s.pending.length}` };
+  } else if (qs.length) {
+    qIndex = Math.min(qIndex, qs.length - 1);
+    const r = qs[qIndex];
+    q = { kind: "build", id: r.id, text: r.text, why: r.why, options: [...new Set([r.choice, ...r.options].filter(Boolean))],
+          details: r.details || {}, pick: r.choice, count: `From the build · ${qIndex + 1} of ${qs.length}`, many: qs.length > 1 };
+  }
+  if (!changed("asking", q)) return;
+  if (!q) { $("asking").innerHTML = ""; return; }
+  const nav = q.many ? `<div class="qnav"><button class="btn" data-nav="-1" ${qIndex ? "" : "disabled"}>‹</button>
+    <button class="btn" data-nav="1" ${qIndex < qs.length - 1 ? "" : "disabled"}>›</button><span class="muted" style="font-size:12px">skip for now</span></div>` : "";
+  $("asking").innerHTML = `<div class="msg swarm"><div class="who">Swarm</div>${esc(q.text)}${q.why ? `<div class="why">${esc(q.why)}</div>` : ""}${nav}</div>
+    <div class="reply" data-ask="${esc(q.id)}"><div class="count">${esc(q.count)}</div>
+      <div class="opts">${q.options.map(o => `<button class="opt ${o === q.pick ? "pick" : ""}" data-value="${esc(o)}" ${q.details[o] ? `data-detail="${esc(q.details[o])}"` : ""}>${esc(o)}</button>`).join("")}</div>
+      <div class="row"><input class="input" style="flex:1" placeholder="Or your own answer" data-own><button class="btn" data-ownbtn>Answer</button></div></div>`;
+  wireAsk($("asking"), (id, value, isPick) => q.kind === "talk" ? post("answer", { index: id, reply: value })
+    : post("question", isPick && q.pick ? { id, keep: true } : { id, text: value }));
+  $("asking").querySelectorAll("[data-nav]").forEach(b => b.onclick = () => { qIndex += Number(b.dataset.nav); drawn.asking = ""; asking(state); });
+  $("chatbox").scrollTop = $("chatbox").scrollHeight;
 }
 
 
@@ -429,7 +428,7 @@ async function refresh() {
   state = s;
   try {
     $("where").textContent = s.project ? `${s.project.name} · ${s.project.path}` : "No project open";
-    chips(s); projectList(s); talk(s); buildPanel(s); questionTab(s); appPanel(s); cycle(s);
+    chips(s); projectList(s); talk(s); asking(s); buildPanel(s); appPanel(s); cycle(s);
   } catch (e) { $("where").textContent = "Display error: " + e; console.error(e); }
 }
 refresh(); setInterval(refresh, 2000);

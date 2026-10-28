@@ -48,6 +48,8 @@ STUCK_OPTIONS = [
     {"label": "Simplify it", "detail": "The planner trims what this file promises next round, then it's built again."},
 ]
 KEEP_TURNS = 12  # agent messages kept after the opening two, so its context stays small
+SPLIT_AFTER = 2  # failed attempts with the code to blame before a file is split into smaller ones
+MAX_PIECES = 4
 DESIGN_TASK = "page-design"
 # On the web stack the page's own script is the UI; a logic file by one of these names would need the DOM.
 UI_NAMES = {"ui", "dom", "view", "views", "page", "index", "main", "app", "display", "render", "renderer", "interface", "screen"}
@@ -518,10 +520,84 @@ class Round:
         if verdict["blame"] == "test" and test_task["status"] == "done" and test_task["attempts"] < max_attempts:
             hub.reopen(test_id, f"review: {reason}")
             return "failed", f"its tests look wrong: {reason}", lambda: hub.retry(task["id"], f"tests redone: {reason}")
-        if verdict["blame"] == "code" and task["attempts"] < max_attempts:
-            return "failed", f"still failing: {reason}", lambda: hub.retry(task["id"], f"review: {reason}", use_attempt=True)
+        if verdict["blame"] == "code":
+            blamed = task.get("code_blamed", 0) + 1
+            same = failure_signature(failure) == task.get("last_failure")
+            hub.set_field(task["id"], "code_blamed", blamed)
+            hub.set_field(task["id"], "last_failure", failure_signature(failure))
+            if (blamed >= SPLIT_AFTER or same) and self.can_split(contract):
+                split = await self.split(task, contract, code, failure, test_code)
+                if split:
+                    return split
+            if task["attempts"] < max_attempts:
+                return "failed", f"still failing: {reason}", lambda: hub.retry(task["id"], f"review: {reason}", use_attempt=True)
         what = "its contract can't work as written" if verdict["blame"] == "contract" else "it keeps failing its tests"
         return (*self.hand_over(task, contract, code, f"{what}: {reason}", failure), None)
+
+    # Splitting a file the builder can't get right
+
+    def can_split(self, contract):
+        """A file is split at most once, and a piece of a split file is never split again."""
+        return not contract.get("split_into") and not contract.get("split_from")
+
+    async def split(self, task, contract, code, failure, test_code):
+        """Break a stuck file into 2 to 4 smaller files. Returns (status, summary, then), or None if it can't.
+
+        The file keeps its exact contract (so nothing that uses it changes) and its tests,
+        and is rebuilt as a thin file that imports the pieces. Each piece is a new file with
+        its own contract, examples, tests and builder, in a folder named after the file (app/board_parts/).
+        """
+        hub, contracts = self.hub, self.hub.contracts
+        path = contract["path"]
+        folder = posixpath.splitext(path)[0] + "_parts"  # app/board.js -> app/board_parts (a folder named like
+        # the file itself would hide it from Python's imports)
+        try:
+            reply = await agents.split(self.sched, self.stack, contracts.brief(path), folder, test_code, code, failure)
+        except LLMError as e:
+            self.events.emit("note", text=f"couldn't split {path}: {e}")
+            return None
+        pieces = []
+        for plan in reply["pieces"][:MAX_PIECES]:
+            piece_path = tidy_path(plan["path"], self.stack)
+            if not piece_path.startswith(folder + "/"):
+                piece_path = f"{folder}/{posixpath.basename(piece_path)}"
+            if piece_path == path or contracts.exists(piece_path):
+                continue
+            pieces.append({**plan, "path": piece_path, "imports": [tidy_path(i, self.stack) for i in plan["imports"]]})
+        if len(pieces) < 2:
+            self.events.emit("note", text=f"couldn't split {path}: the planner gave fewer than 2 usable pieces")
+            return None
+        made = []
+        for plan in pieces:
+            names = {p["path"] for p in pieces}
+            plan["imports"] = [i for i in plan["imports"] if i in names and i != plan["path"]]
+            try:
+                piece, _ = contracts.upsert(plan, self.number, f"split from {path}")
+            except (ContractError, ValueError) as e:
+                self.events.emit("note", text=f"skipped a piece of {path}: {e}")
+                continue
+            contracts.mark(piece["path"], split_from=path)
+            made.append(piece)
+        if len(made) < 2:
+            for piece in made:
+                contracts.remove(piece["path"])
+            return None
+        self.untangle([p["path"] for p in made])
+        for piece in made:
+            self.ensure_tasks(contracts.get(piece["path"]), "new")
+        self.write_packages()
+        piece_paths = [p["path"] for p in made]
+        contracts.set_imports(path, contract["imports"] + piece_paths, self.number, f"split into {', '.join(piece_paths)}")
+        contracts.mark(path, split_into=piece_paths)
+        self.events.emit("split", path=path, pieces=piece_paths, why=reply["why"].strip())
+        why = reply["why"].strip() or "it was too much for one go"
+
+        def rebuild():
+            hub.restart(task["id"], f"split into {', '.join(piece_paths)} because {why}. Keep your contract exactly, "
+                                    "and do the work by importing and calling the pieces.")
+            hub.set_depends(task["id"], hub.task(task["id"])["depends_on"] + [p["id"] for p in made])
+
+        return "failed", f"split into {len(made)} smaller files: {', '.join(piece_paths)}", rebuild
 
     # Files left for you
 
@@ -852,6 +928,12 @@ def handover_lines(brief, contract, why, failure, stack):
 
 HANDOVER = "ROUGHCUT: LEFT FOR YOU"
 HANDOVER_END = "END OF ROUGHCUT NOTE"
+
+
+def failure_signature(output):
+    """What failed, without the noise: the names of the failing tests, so the same failure twice is noticed."""
+    names = re.findall(r"^\s*(?:✖|not ok \d+ -|FAIL:|ERROR:)\s*(.+?)\s*(?:\(\d[\d.]*m?s\))?$", output or "", re.M)
+    return "; ".join(sorted(set(n.strip() for n in names))) or (output or "").strip()[-200:]
 
 
 def strip_handover(code):

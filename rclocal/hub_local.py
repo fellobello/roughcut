@@ -52,7 +52,7 @@ DEFAULT_CONFIG = {
     # Longest reply per call kind, in tokens. A model that loses track stops here instead of
     # writing until the call times out.
     "max_tokens": {
-        "brainstorm": 1500, "planner": 3000, "survey": 1200, "tester": 3000, "builder": 5000, "designer": 4000,
+        "brainstorm": 1500, "planner": 3000, "split": 2500, "survey": 1200, "tester": 3000, "builder": 5000, "designer": 4000,
         "step": 300, "notes": 800, "page_part": 200, "user_plan": 900, "user_verdict": 700,
         "reviewer": 600, "reporter": 600,
     },
@@ -180,6 +180,13 @@ class LocalHub(Hub):
             task = self.task(task_id)
             task.update(status="todo", attempts=0)
             task["notes"].append(f"retry: {reason}")
+            self._save_task(task)
+
+    def set_field(self, task_id, key, value):
+        """Keep a small fact on a task (like how often its code has been blamed)."""
+        with self.locked():
+            task = self.task(task_id)
+            task[key] = value
             self._save_task(task)
 
     def mark_acted(self, question_id):

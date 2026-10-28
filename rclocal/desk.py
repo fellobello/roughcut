@@ -129,7 +129,8 @@ class Desk:
         item = self.pending[index]
         if item["answer"] is None:
             item["answer"] = Brainstorm(self.need_hub()).answer(item["question"], reply)
-            self.post("you", f"{item['question']['text']} → {item['answer']}")
+            self.post("swarm", item["question"]["text"])
+            self.post("you", item["answer"])
         return self.state()
 
     def keep_talking(self):
@@ -195,6 +196,8 @@ class Desk:
         """Answer a question or guess from the rounds (QUESTIONS.md)."""
         hub = self.need_hub()
         result = hub.answer(question_id, text, keep)
+        self.post("swarm", result["question"]["text"])
+        self.post("you", result["question"]["answer"])
         hub.render()
         project.render(hub)
         return {**self.state(), "reworked": result["reworked"]}

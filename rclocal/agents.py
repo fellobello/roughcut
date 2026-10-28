@@ -215,6 +215,28 @@ async def plan(sched, stack, idea, conventions, contracts_md, answers, first):
     return await sched.ask("planner", _chat(system, user), "plan", reply="planner")
 
 
+async def split(sched, stack, brief, folder, test_code, code, failure):
+    """Break a file the builder keeps getting wrong into smaller files. Returns SPLIT data."""
+    system = (
+        f"Planner: {TEAM}\n"
+        "A builder failed twice to write the file below so that its tests pass. Split the work into 2 to 4 smaller "
+        f"files in {folder}/, each with one clear job that is easy to get right on its own (like the math, the data, "
+        "the steps). The original file will import the pieces and must keep its contract exactly, so together the "
+        "pieces must cover everything it promises. Pieces may import each other, one way only, but never the original "
+        f"file. For each piece give its path, purpose, exports and imports. Each export's signature is one exact line: "
+        f"{stack.export_hint}. Give every function 1 or 2 examples: call is one exact call with literal arguments, like "
+        f"{stack.example_call}, and returns is exactly what it returns, as a literal, like {stack.example_returns}. "
+        f"In why, one sentence on what made the file hard. {SAFETY}\n{JSON_ONLY}"
+    )
+    user = (
+        _section("The file's contract", brief)
+        + _section("Its tests", test_code[:4000])
+        + _section("The builder's best attempt", code[:4000])
+        + _section("How it fails", failure[-1500:])
+    )
+    return await sched.ask("planner", _chat(system, user), "split", reply="split")
+
+
 async def write_tests(sched, stack, brief, conventions, test_path, notes):
     """Returns (code, cut_off)."""
     system = (
