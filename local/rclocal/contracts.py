@@ -142,7 +142,11 @@ class Contracts:
             f"Purpose: {contract['purpose']}",
             "Exports:",
         ]
-        lines += [f"  {e['signature']}  # {e['description']}" for e in contract["exports"]] or ["  (nothing)"]
+        for e in contract["exports"]:
+            lines.append(f"  {e['signature']}  # {e['description']}")
+            lines += [f"      e.g. {x['call']} returns {x['returns']}" for x in e.get("examples", [])]
+        if not contract["exports"]:
+            lines.append("  (nothing)")
         return "\n".join(lines)
 
     def brief(self, path):
@@ -163,7 +167,9 @@ class Contracts:
         ]
         for c in self.all():
             out += [f"## `{c['path']}` (v{c['version']})", "", c["purpose"], ""]
-            out += [f"- `{e['signature']}`: {e['description']}" for e in c["exports"]]
+            for e in c["exports"]:
+                out.append(f"- `{e['signature']}`: {e['description']}")
+                out += [f"  - `{x['call']}` returns `{x['returns']}`" for x in e.get("examples", [])]
             if c["imports"]:
                 out += ["", "Uses: " + ", ".join(f"`{i}`" for i in c["imports"])]
             out += [f"", f"Tests: `{c['test_path']}`", ""]

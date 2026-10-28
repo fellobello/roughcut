@@ -33,12 +33,18 @@ def _list(item):
 STR = {"type": "string"}
 BOOL = {"type": "boolean"}
 
+# An exact case an export must meet: a call with literal arguments, and the literal it returns.
+# These are the shared truth between tester and builder: rounds.write_tests adds them to the
+# tests as they are, so neither side has to guess what a vague description means.
+EXAMPLE = _obj(["call", "returns"], call=STR, returns=STR)  # e.g. "tipFor(100, 15)" -> "15"
+
 # One function, class or constant a file promises to other files.
 EXPORT = _obj(
-    ["name", "signature", "description"],
+    ["name", "signature", "description", "examples"],
     name=STR,
     signature=STR,  # e.g. "def to_celsius(f: float) -> float" or "class Route"
     description=STR,
+    examples=_list(EXAMPLE),  # 1 or 2 for a function; none for a class or constant
 )
 
 # What the planner proposes for one file. contracts.py adds id, version, test_path and history.

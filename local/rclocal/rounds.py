@@ -340,8 +340,26 @@ class Round:
             notes.append(f"Your last test file was rejected: {problem}")
         else:
             return "failed", f"no usable test file: {problem}"
+        code, added = self.with_examples(code, contract)
         self.hub._write_text(self.hub.project / contract["test_path"], code)
-        return "done", f"wrote {contract['test_path']}"
+        return "done", f"wrote {contract['test_path']}" + (f", plus {added} contract example{'s' if added != 1 else ''}" if added else "")
+
+    def with_examples(self, code, contract):
+        """Add the contract's examples to the tests, so tester and builder are held to the same cases.
+
+        Returns (code, how many examples were added). Examples that aren't valid code are left
+        out, with a note, rather than breaking a test file that works.
+        """
+        extra = self.stack.example_tests(contract)
+        if not extra:
+            return code, 0
+        joined = code.rstrip() + "\n\n" + extra
+        problem = self.stack.syntax_error(joined, contract["test_path"]) or "; ".join(self.stack.guard(joined))
+        if problem:
+            self.events.emit("note", text=f"{contract['path']}: its contract examples aren't valid code, so the tests "
+                                          f"go without them ({problem[:160]})")
+            return code, 0
+        return joined, extra.count("assert")
 
     async def build(self, task, contract):
         """Run the builder agent for one file. Returns (status, summary, then).

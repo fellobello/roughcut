@@ -35,8 +35,8 @@ PY, WEB = STACKS["python"], STACKS["web"]
 HAS_NODE = bool(shutil.which("node"))
 
 
-def export(name, signature, description="does it"):
-    return {"name": name, "signature": signature, "description": description}
+def export(name, signature, description="does it", examples=()):
+    return {"name": name, "signature": signature, "description": description, "examples": list(examples)}
 
 
 def plan_of(files, complete=True):
@@ -401,6 +401,15 @@ class RoundTest(HubCase):
         self.assertTrue(summary["tests_passed"])
         self.assertEqual(set(self.statuses().values()), {"done"})
 
+    def test_python_examples_become_a_test_case(self):
+        convert = {**CONVERT, "exports": [export("to_celsius", "def to_celsius(f: float) -> float",
+                                                 examples=[{"call": "to_celsius(212)", "returns": "100.0"}])]}
+        builds = {"app/convert.py": [CONVERT_GOOD], "app/report.py": [REPORT_GOOD]}
+        summary = self.run_round(Script(builds, PY_TESTS, plan_of([convert, REPORT])))
+        self.assertTrue(summary["tests_passed"])
+        tests = (self.project / "tests/test_app_convert.py").read_text()
+        self.assertIn("self.assertEqual(_contract.to_celsius(212), 100.0)", tests)
+
     def test_planned_paths_are_tidied_to_fit_the_layout(self):
         from rclocal.rounds import tidy_path
 
@@ -453,6 +462,35 @@ class WebRoundTest(HubCase):
         self.assertTrue((self.project / "package.json").exists())
         self.assertIn("--accent", (self.project / "kit.css").read_text())
         self.assertEqual(len(checked), 1)
+
+    def tip_round(self, examples):
+        tip = {**TIP, "exports": [export("tipFor", "function tipFor(bill, percent) -> number", examples=examples)]}
+        script = Script({"app/tip.js": [TIP_GOOD]}, WEB_TESTS, plan_of([tip]))
+        rnd = Round(self.hub, FakeLLM(script))
+
+        async def fake_check(screenshot=None):
+            return True, ""
+
+        rnd.runner.check_page = fake_check
+        return asyncio.run(rnd.run())
+
+    def test_contract_examples_become_tests(self):
+        summary = self.tip_round([{"call": "tipFor(100, 15)", "returns": "15"}, {"call": "tipFor(0, 20)", "returns": "0"}])
+        self.assertTrue(summary["tests_passed"])
+        tests = (self.project / "tests/app_tip.test.mjs").read_text()
+        self.assertIn("assert.deepStrictEqual(__contract.tipFor(100, 15), 15);", tests)
+        self.assertIn("plus 2 contract examples", self.hub.task("app-tip-js-tests")["summary"])
+        self.assertIn("e.g. tipFor(100, 15) returns 15", self.hub.contracts.brief("app/tip.js"))
+        self.assertIn("`tipFor(100, 15)` returns `15`", (self.project / "CONTRACTS.md").read_text())
+
+    def test_a_wrong_example_holds_the_code_to_it(self):
+        summary = self.tip_round([{"call": "tipFor(100, 15)", "returns": "16"}])
+        self.assertFalse(summary["tests_passed"])  # the examples are the shared truth, even when wrong
+
+    def test_examples_that_are_not_code_are_left_out(self):
+        summary = self.tip_round([{"call": "tipFor(100, 15", "returns": "15"}, {"call": "new Tip()", "returns": "{}"}])
+        self.assertTrue(summary["tests_passed"])
+        self.assertNotIn("__contract", (self.project / "tests/app_tip.test.mjs").read_text())
 
     def test_the_page_may_only_import_real_exports(self):
         rnd = Round(self.hub, FakeLLM(None))

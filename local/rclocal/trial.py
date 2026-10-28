@@ -42,11 +42,12 @@ TIP = {
     "purpose": "Work out the tip, the total and each person's share of a bill.",
     "exports": [
         {"name": "tipAmount", "signature": "function tipAmount(bill, percent) -> number",
-         "description": "the tip in dollars: tipAmount(120, 15) is 18"},
+         "description": "the tip in dollars: tipAmount(120, 15) is 18", "examples": []},
         {"name": "totalWithTip", "signature": "function totalWithTip(bill, percent) -> number",
-         "description": "bill plus tip: totalWithTip(120, 15) is 138"},
+         "description": "bill plus tip: totalWithTip(120, 15) is 138", "examples": []},
         {"name": "perPerson", "signature": "function perPerson(bill, percent, people) -> number",
-         "description": "each person's share of the total, rounded to cents: perPerson(120, 15, 4) is 34.5"},
+         "description": "each person's share of the total, rounded to cents: perPerson(120, 15, 4) is 34.5",
+         "examples": []},
     ],
     "imports": [],
 }

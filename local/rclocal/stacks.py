@@ -138,6 +138,24 @@ def filter_styles(css):
     return "\n".join(kept), dropped
 
 
+def example_cases(contract, limit=2):
+    """The contract's examples that can be checked as written: (call, returns) pairs.
+
+    A call must be one expression that calls the export by name; anything else (a class,
+    several statements) is left out rather than guessed at.
+    """
+    cases = []
+    for export in contract["exports"]:
+        name = export["name"].split(".")[0]
+        for example in export.get("examples", [])[:limit]:
+            call, returns = example["call"].strip().rstrip(";"), example["returns"].strip().rstrip(";")
+            if not returns or "\n" in call + returns or ";" in call + returns:
+                continue
+            if re.match(rf"{re.escape(name)}\s*\(", call):
+                cases.append((call, returns))
+    return cases
+
+
 class Stack:
     name = ""
     lang = ""  # the code fence language
@@ -177,6 +195,24 @@ class Python(Stack):
         return self.import_name(path) in test_code
 
     test_header = "import unittest"
+    example_call, example_returns = "to_celsius(212)", "100.0"
+
+    def example_tests(self, contract):
+        """The contract's examples as a test case, added to the end of the tester's file."""
+        cases = example_cases(contract)
+        if not cases:
+            return ""
+        lines = [
+            f"import {self.import_name(contract['path'])} as _contract",
+            "",
+            "",
+            "class ContractExamples(unittest.TestCase):",
+            '    """The examples in the contract, exactly as written there."""',
+            "",
+            "    def test_the_contract_examples_hold(self):",
+        ]
+        lines += [f"        self.assertEqual(_contract.{call}, {returns})" for call, returns in cases]
+        return "\n".join(lines) + "\n"
 
     def repair_test(self, test_code):
         """Add the standard import small models often forget. Free, unlike another model call."""
@@ -244,6 +280,21 @@ class Web(Stack):
         return f"../{path}" in test_code
 
     test_header = "import { test } from 'node:test';\nimport assert from 'node:assert/strict';"
+    example_call, example_returns = "tipFor(100, 15)", "15"
+
+    def example_tests(self, contract):
+        """The contract's examples as one test, added to the end of the tester's file."""
+        cases = example_cases(contract)
+        if not cases:
+            return ""
+        lines = [
+            f"import * as __contract from '../{contract['path']}';",
+            "",
+            "// The examples in the contract, exactly as written there.",
+            "test('the contract examples hold', () => {",
+        ]
+        lines += [f"  assert.deepStrictEqual(__contract.{call}, {returns});" for call, returns in cases]
+        return "\n".join(lines + ["});"]) + "\n"
 
     def repair_test(self, test_code):
         """Add the node:test and node:assert imports small models often forget. Free, unlike another model call."""

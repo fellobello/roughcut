@@ -96,7 +96,9 @@ async def survey(sched, stack, path, code, other_paths):
         f"Surveyor: {TEAM}\n"
         "The project already exists. Read one of its files and write that file's contract: its purpose in one "
         f"sentence, every export other files use or could use (each signature one exact line: {stack.export_hint}), "
-        "and the other project files it imports. Describe only what the code does now. "
+        f"1 or 2 examples per function (an exact call with literal arguments, like {stack.example_call}, and exactly "
+        "what the code returns for it, as a literal), and the other project files it imports. Describe only what "
+        "the code does now. "
         f"{JSON_ONLY}"
     )
     user = _section("Path", path) + _section("Other files in the project", "\n".join(other_paths)) + _section("Code", code[:8000])
@@ -179,7 +181,10 @@ async def plan(sched, stack, idea, conventions, contracts_md, answers, first):
     rules = (
         f"For each file give its path (like {stack.example}), its purpose, its exports and the other project "
         f"files it imports. Each export's signature is one exact line: {stack.export_hint}. Prefer small pure "
-        "functions over data tables, and describe in each export's description what it returns for a typical input."
+        "functions over data tables. Give every function 1 or 2 examples that pin down the part that could be read "
+        f"two ways (an edge, invalid input, rounding, an order): call is one exact call with literal arguments, like "
+        f"{stack.example_call}, and returns is exactly what it returns, as a literal in the same language, like "
+        f"{stack.example_returns}. The tests check these examples exactly, so work them out carefully."
     )
     if first:
         job = (
@@ -216,7 +221,8 @@ async def write_tests(sched, stack, brief, conventions, test_path, notes):
         f"Tester: {TEAM}\n"
         "Write the test file for one file, using only its contract: you never see its code. Test each export "
         "once or twice with typical inputs, comparing floats with a tolerance, and name each test after the "
-        f"promise it checks. Test only what the contract promises. Keep the file under 80 lines. Start the file "
+        f"promise it checks. Test only what the contract promises. The contract's examples are added to your file "
+        f"automatically, so test other cases. Keep the file under 80 lines. Start the file "
         f"with:\n{stack.test_header}\n{SAFETY}\n"
         f"{code_only(stack.lang)}"
     )
