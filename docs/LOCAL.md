@@ -16,7 +16,7 @@ ollama pull qwen3:8b && ollama pull qwen2.5-coder:7b
 ```
 
 ```bash
-local/roughcut-local new "a pace calculator for runners"
+./roughcut-local new "a pace calculator for runners"
 ```
 
 That talks the idea through with you, builds it in up to 4 rounds, then opens the app in
@@ -25,31 +25,35 @@ your browser.
 Or do all of it from one page in your browser:
 
 ```bash
-local/roughcut-local studio
+./roughcut-local studio
 ```
 
 The studio (http://127.0.0.1:8770) has your projects on the left (open one, start a new
-one, or open a folder or GitHub repo) and five tabs:
+one, or bring in existing code from a folder or GitHub repo) and four tabs:
 
 - **Talk**: chat with the brainstormer. Its questions come up one at a time in their own box,
   each answer 2 or 3 words, with what it means when you hover over it; ★ marks its pick.
   Type your own answer instead, or press Keep talking to take its picks. Build starts the rounds.
-- **Build**: the round as it runs: tasks, model calls, speed, what happened. Stop after this round.
-- **Questions**: what the rounds guessed or need from you, one at a time, one click to keep or change.
+  Once it has built, the guesses it made and the files it left for you show up here too, one
+  at a time: one click keeps or changes each.
+- **Progress**: the round as it runs: tasks, model calls, speed, what happened. Stop after this round.
 - **App**: the app running inside the page, and every screenshot from the rounds and test users.
 - **Models**: whether Ollama answers, what's installed, and a model per role (changes are
   used from the next call). Performance settings will go here later.
 
 The projects column (left) and the cycle column (right) open and close with the icons at
 the top corners. The cycle lists the stages of a round (talk, plan, build files, design the
-page, check everything, test users, report, your answers) and lights up the one running.
+page, check everything, test users, report) and lights up the one running.
 
-**When a file is stuck** during a build, you get a Mac notification and the studio puts the
-question in front of everything with a countdown. Answer within 10 minutes, or the run
-takes the suggested answer ("Simplify it") and keeps going, so a night's build loses minutes,
-not the night. Set the wait with `answer_wait` in `.hub/local.json`, or `--wait <minutes>`
-on `round` and `new` (0 stops and waits for you instead). While rounds run, the Mac is kept
-awake (`caffeinate`); keep it plugged in, since closing the lid still puts it to sleep.
+**Nothing stops to ask you.** Like the Claude version, a run guesses and keeps going. When
+the models can't get a file to pass, it's **left for you**: the file keeps its best attempt,
+with a note at the top saying what it must do (its contract and examples), how it's tested
+and why they got stuck, and everything that doesn't need it is built anyway. Finish it in
+any editor; once its tests pass, the next round marks it done. Or answer its guess with
+"Try again" or "Simplify it", and the next round acts on that. You get one notification when
+the run ends, saying what was built, what's left for you and how many guesses to look at.
+While rounds run, the Mac is kept awake (`caffeinate`); keep it plugged in, since closing
+the lid still puts it to sleep.
 
 The page talks only to the desk (`rclocal/desk.py`), which talks to the hub. The desk
 knows what the hub doesn't: which project is open, where the chat is, and what's running.
@@ -60,15 +64,15 @@ drive it. The project goes in `~/roughcut-projects/<name>`. Come back to it late
 folder, by name, or bring in a GitHub repo:
 
 ```bash
-local/roughcut-local projects
+./roughcut-local projects
 ```
 
 ```bash
-local/roughcut-local open pace-calculator
+./roughcut-local open pace-calculator
 ```
 
 ```bash
-local/roughcut-local open https://github.com/you/some-small-app
+./roughcut-local open https://github.com/you/some-small-app
 ```
 
 `open` shows the project's notes, asks what you'd like to change, talks it through, and
@@ -90,7 +94,7 @@ file, and every agent sees only that file's contract plus the contracts of what 
 ## The roles
 
 Every role has one job and its own model in `.hub/local.json` (the list is
-`ROLE_JOBS` in [`rclocal/protocol.py`](rclocal/protocol.py)):
+`ROLE_JOBS` in [`rclocal/protocol.py`](../rclocal/protocol.py)):
 
 | Role | Job |
 | --- | --- |
@@ -184,7 +188,7 @@ something it doesn't yet; additions are safe, so they're applied right away.
 | `~/.roughcut-local/projects.json` | Every project made or opened, for `projects` and `open <name>`. |
 
 All message formats (each role's reply schema and every event type) are in one file,
-[`rclocal/protocol.py`](rclocal/protocol.py).
+[`rclocal/protocol.py`](../rclocal/protocol.py).
 
 ## Commands
 
@@ -195,7 +199,7 @@ All message formats (each role's reply schema and every event type) are in one f
 | `projects` | List every project |
 | `trial --role <role>` | Try models on a dummy task for one role (below) |
 | `talk` | Talk about changes to this project before the next round |
-| `round --rounds N --ui` | Run rounds; stops early when a question blocks, when everything passes, or when a round makes no progress |
+| `round --rounds N --ui` | Run rounds; stops early when everything passes or a round makes no progress |
 | `questions --ask` | Go through open questions and guesses one at a time |
 | `answer <id> --text ...` / `--keep` | Answer one |
 | `redo <task> --reason ...` | Send a task back |
@@ -208,7 +212,7 @@ Project commands run in the current folder, or take `--project <folder>` first.
 ## Trying models
 
 ```bash
-local/roughcut-local trial --role designer --models qwen2.5-coder:7b,qwen2.5-coder:14b --ui
+./roughcut-local trial --role designer --models qwen2.5-coder:7b,qwen2.5-coder:14b --ui
 ```
 
 Each model gets the same small task for the role, run by the same code a real round uses,
@@ -260,7 +264,7 @@ container there.
 ## Tests
 
 ```bash
-python3 -m unittest discover -s local/tests
+python3 -m unittest discover -s tests
 ```
 
 They use a fake model, so they don't need Ollama. A few drive a real headless Chrome and

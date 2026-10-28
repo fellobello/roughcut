@@ -7,7 +7,7 @@
   "plugins": [
     {
       "name": "roughcut",
-      "source": "./",
+      "source": "./plugin",
       "description": "Turn a software idea into a working sample, one round of building and questions at a time."
     }
   ]

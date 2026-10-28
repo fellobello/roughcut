@@ -6,14 +6,14 @@ You give it an idea in a sentence or two, the way you'd write it in a notebook. 
 
 There are two ways to run it:
 
-| | [Roughcut Local](local/README.md) (Ollama) | Roughcut (Claude Code plugin) |
+| | [Roughcut Local](docs/LOCAL.md) (Ollama) | [Roughcut for Claude Code](plugin/README.md) (plugin) |
 | --- | --- | --- |
 | Models | Local [Ollama](https://ollama.com) models only: no API keys, no plan usage | Claude, through Claude Code |
 | Best for | Small browser apps and Python tools, overnight runs on a laptop | Bigger projects, anything Claude can build |
 | How you use it | The studio, a page in your browser, or the `roughcut-local` command | `/roughcut:build`, `/roughcut:answer` in Claude Code |
 | Speed | Slower (the demo bill splitter took about 25 minutes on a 16 GB Mac), free to run | Fast, but uses your Claude usage |
 
-> Status: early. The plugin has run one full round on a real idea; see the example below. Roughcut Local builds small apps end to end, but the small models still get stuck on harder logic and ask you for help.
+> Status: early. The plugin has run one full round on a real idea; see the example below. Roughcut Local builds small apps end to end, but the small models still get stuck on harder logic; those files are left for you to finish, with a note on what they need.
 
 ## Example
 
@@ -46,7 +46,7 @@ There are two ways to run it:
 - **Round 0 never asks you anything.** Big choices (language, storage, outside services) get a sensible default and go at the top of `QUESTIONS.md` as guesses to confirm.
 - **Interfaces come first.** The planner writes them as real code before any builder starts, so modules can be built at the same time without guessing about each other.
 - **Tests come from the spec, not the code.** Each module gets a separate test task, written by an agent that never reads that module's implementation.
-- **Agents don't wait on each other.** They talk through files in `.hub/`, written only by `scripts/hub.py`, which locks every change.
+- **Agents don't wait on each other.** They talk through files in `.hub/`, written only by `plugin/scripts/hub.py`, which locks every change.
 - **Changing an answer rebuilds only what depends on it.**
 - **Code only.** Images, icons and other assets are placeholders.
 
@@ -59,7 +59,7 @@ ollama pull qwen3:8b && ollama pull qwen2.5-coder:7b
 ```
 
 ```bash
-local/roughcut-local studio
+./roughcut-local studio
 ```
 
 That opens the studio at http://127.0.0.1:8770. Start a new project from an idea, talk it through with the brainstormer (it pushes back and asks a few questions, each with options), press Build, and watch the rounds. Answer what the models guessed in the Questions tab, try the app in the App tab, and pick a model per role in the Models tab.
@@ -72,7 +72,7 @@ What's different from the plugin, briefly:
 - **A safety box.** Model-written code is scanned before it runs, then runs in a macOS sandbox with no internet and no access outside the project.
 - **A trial bench.** `roughcut-local trial --role designer` scores models on a role's task, so you can pick the best balance of speed and quality for your machine.
 
-The [Roughcut Local README](local/README.md) has everything else: every command, the roles, where things live, and the safety box in detail.
+[docs/LOCAL.md](docs/LOCAL.md) has everything else: every command, the roles, where things live, and the safety box in detail.
 
 ## Install the plugin
 
@@ -81,7 +81,7 @@ Needs Claude Code with [dynamic workflows](https://code.claude.com/docs/en/workf
 Try it from a local copy:
 
 ```bash
-claude --plugin-dir /path/to/roughcut
+claude --plugin-dir /path/to/roughcut/plugin
 ```
 
 Or install it from GitHub:
@@ -112,7 +112,7 @@ Claude Code shows your 5-hour and weekly usage only to the status line, so rough
 {
   "statusLine": {
     "type": "command",
-    "command": "python3 /path/to/roughcut/scripts/usage_statusline.py"
+    "command": "python3 /path/to/roughcut/plugin/scripts/usage_statusline.py"
   }
 }
 ```
@@ -139,14 +139,13 @@ my-idea/
 
 | Path | What it is |
 | --- | --- |
-| `workflows/round.js` | The orchestrator: one round, as a Claude Code workflow |
-| `scripts/hub.py` | The state store every agent goes through (standard library only) |
-| `scripts/usage_statusline.py` | Optional status line that saves usage numbers for the reports |
-| `agents/` | The five roles: planner, builder, tester, synthesizer, questioner |
-| `skills/` | The three commands |
-| `tests/` | `python3 -m unittest discover -s tests` for the scripts, `node --test tests/round.test.mjs` for the workflow |
-| `docs/PLAN.md` | The design, and what's planned next |
-| `local/` | Roughcut Local: the same rounds on local Ollama models only, with the studio, test users and trial bench ([README](local/README.md)) |
-| `local/tests/` | `python3 -m unittest discover -s local/tests`; uses a fake model, so no Ollama needed |
+| `roughcut-local` | The command for Roughcut Local: `./roughcut-local studio`, `new`, `open`, `round`, `trial` |
+| `rclocal/` | Roughcut Local itself: the agents, the rounds, the safety box, the studio |
+| `tests/` | Roughcut Local's tests: `python3 -m unittest discover -s tests` (a fake model, so no Ollama needed) |
+| `docs/LOCAL.md` | Everything about Roughcut Local: every command, the roles, where things live, the safety box |
+| `plugin/` | The Claude Code plugin: agents, commands, the round workflow and `scripts/hub.py`, the state store both versions share ([README](plugin/README.md)) |
+| `plugin/tests/` | The plugin's tests: `python3 -m unittest discover -s plugin/tests` and `node --test plugin/tests/round.test.mjs` |
+| `.claude-plugin/marketplace.json` | Lets Claude Code install the plugin from this repo |
+| `.hub/`, `QUESTIONS.md` | Roughcut's own rounds: the plugin was built with itself |
 
 Built with Claude Code.

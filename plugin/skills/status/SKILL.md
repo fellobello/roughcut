@@ -1,6 +1,6 @@
 ---
 name: status
-description: Show where a roughcut project stands: the round, what's built, what's blocked, and what needs the user. Use when the user runs /roughcut:status or asks how a roughcut project is going.
+description: "Show where a roughcut project stands: the round, what's built, what's blocked, and what needs the user. Use when the user runs /roughcut:status or asks how a roughcut project is going."
 argument-hint: "[project folder]"
 ---
 

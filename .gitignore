@@ -3,4 +3,4 @@ __pycache__/
 .worktrees/
 .hub/.lock
 .hub/.tmp-*
-local/screenshots/
+screenshots/

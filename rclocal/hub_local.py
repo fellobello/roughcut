@@ -1,7 +1,7 @@
 """Roughcut's hub, reused for local rounds.
 
 Tasks, questions, decisions, QUESTIONS.md and the round report all come from
-scripts/hub.py unchanged. What differs: every task owns exactly one file, so tasks
+plugin/scripts/hub.py unchanged. What differs: every task owns exactly one file, so tasks
 work in the project folder itself instead of a git worktree each, and the hub also
 holds the contract registry, the shared memory, the event log and local.json.
 """
@@ -12,7 +12,7 @@ import copy
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugin" / "scripts"))
 
 from hub import HUB_OWNER, Hub, HubError  # noqa: E402
 
