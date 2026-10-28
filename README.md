@@ -1,10 +1,19 @@
 # Roughcut
 
-A Ollama plugin that turns a software idea into a working sample, a round at a time.
+Turns a software idea into a working sample, a round at a time, on local Ollama models or with Claude.
 
-You give it an idea in a sentence or two, the way you'd write it in a notebook. Agents plan it, build the modules in parallel, merge and test them, and then stop with a short list of questions. You answer, and the next round builds on your answers. You decide when it's done.
+You give it an idea in a sentence or two, the way you'd write it in a notebook. Agents plan it, build the pieces in parallel, test them, and then stop with a short list of questions. You answer, and the next round builds on your answers. You decide when it's done.
 
-> Status: early. It has run one full round on a real idea; see the example below.
+There are two ways to run it:
+
+| | [Roughcut Local](local/README.md) (Ollama) | Roughcut (Claude Code plugin) |
+| --- | --- | --- |
+| Models | Local [Ollama](https://ollama.com) models only: no API keys, no plan usage | Claude, through Claude Code |
+| Best for | Small browser apps and Python tools, overnight runs on a laptop | Bigger projects, anything Claude can build |
+| How you use it | The studio, a page in your browser, or the `roughcut-local` command | `/roughcut:build`, `/roughcut:answer` in Claude Code |
+| Speed | Slower (the demo bill splitter took about 25 minutes on a 16 GB Mac), free to run | Fast, but uses your Claude usage |
+
+> Status: early. The plugin has run one full round on a real idea; see the example below. Roughcut Local builds small apps end to end, but the small models still get stuck on harder logic and ask you for help.
 
 ## Example
 
@@ -41,7 +50,31 @@ You give it an idea in a sentence or two, the way you'd write it in a notebook. 
 - **Changing an answer rebuilds only what depends on it.**
 - **Code only.** Images, icons and other assets are placeholders.
 
-## Install
+## Roughcut Local in two minutes
+
+Needs Python 3.9 or later, git, Node, Google Chrome, and [Ollama](https://ollama.com) running.
+
+```bash
+ollama pull qwen3:8b && ollama pull qwen2.5-coder:7b
+```
+
+```bash
+local/roughcut-local studio
+```
+
+That opens the studio at http://127.0.0.1:8770. Start a new project from an idea, talk it through with the brainstormer (it pushes back and asks a few questions, each with options), press Build, and watch the rounds. Answer what the models guessed in the Questions tab, try the app in the App tab, and pick a model per role in the Models tab.
+
+What's different from the plugin, briefly:
+
+- **One file per task.** Small models do well with one file and badly with a whole project, so every agent sees one file's contract and nothing more.
+- **Brainstorm first.** Before anything is built, the idea is talked through and kept as a brief in `PROJECT.md`, which is updated every round so a project can be picked up months later.
+- **Test users.** Three simulated people try each finished page in a real browser and report what's wrong, independently of the tests.
+- **A safety box.** Model-written code is scanned before it runs, then runs in a macOS sandbox with no internet and no access outside the project.
+- **A trial bench.** `roughcut-local trial --role designer` scores models on a role's task, so you can pick the best balance of speed and quality for your machine.
+
+The [Roughcut Local README](local/README.md) has everything else: every command, the roles, where things live, and the safety box in detail.
+
+## Install the plugin
 
 Needs Claude Code with [dynamic workflows](https://code.claude.com/docs/en/workflows) (on a Pro plan, turn them on in `/config`), `git`, and Python 3.9 or later.
 
@@ -61,7 +94,7 @@ claude plugin marketplace add fellobello/roughcut
 claude plugin install roughcut@roughcut
 ```
 
-## Use
+## Use the plugin
 
 | Command | What it does |
 | --- | --- |
@@ -113,6 +146,7 @@ my-idea/
 | `skills/` | The three commands |
 | `tests/` | `python3 -m unittest discover -s tests` for the scripts, `node --test tests/round.test.mjs` for the workflow |
 | `docs/PLAN.md` | The design, and what's planned next |
-| `local/` | Experimental: the same rounds on local Ollama models only, one file per task ([README](local/README.md)) |
+| `local/` | Roughcut Local: the same rounds on local Ollama models only, with the studio, test users and trial bench ([README](local/README.md)) |
+| `local/tests/` | `python3 -m unittest discover -s local/tests`; uses a fake model, so no Ollama needed |
 
 Built with Claude Code.
