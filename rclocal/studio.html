@@ -139,6 +139,8 @@ h1 { letter-spacing: .02em; } h2, .msg .who, th { letter-spacing: .14em; }
 .chip, .stages .n, .dot { box-shadow: var(--inset); }
 .opt { box-shadow: var(--bevel); } .opt.pick { box-shadow: var(--inset); }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+/* Talk: no panels behind the chat or the message box, so they sit right on the page. */
+#talk .card { background: none; box-shadow: none; padding: 0 4px; margin-bottom: 18px; }
 @media (max-width: 900px) {
   .layout, body.no-left .layout, body.no-right .layout { grid-template-columns: minmax(0, 1fr); }
   #left, main, #right { grid-column: 1; }
