@@ -9,13 +9,19 @@
   --bg: #f6f6f3; --panel: #ffffff; --panel-2: #f1f1ed; --ink: #1b1b19; --ink-2: #55554f; --ink-3: #8a8a83;
   --line: #e4e3dd; --accent: #3b5bdb; --accent-ink: #fff; --accent-soft: #e8edff; --ok: #1f8a4c; --warn: #b7791f; --bad: #c2361f;
   --tip: #1b1b19; --tip-ink: #f6f6f3;
-  --radius: 12px; --font: system-ui, -apple-system, "Segoe UI", sans-serif; --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --radius: 12px; --font: "Avenir Next", Avenir, system-ui, -apple-system, "Segoe UI", sans-serif; --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --display: Futura, "Century Gothic", "Avenir Next", system-ui, sans-serif;  /* 50s-60s space-age lettering */
+  --spring: all 500ms cubic-bezier(0.68, -0.55, 0.265, 1.55) 50ms;  /* overshoots a little, then settles */
+  --inset: inset 0 2px 4px rgb(0 0 0 / 14%), inset 0 0 0 1px rgb(0 0 0 / 4%);
+  --bevel: inset 0 1px 0 rgb(255 255 255 / 55%), inset 0 -1px 0 rgb(0 0 0 / 6%);
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root { --bg: #121211; --panel: #1c1c1a; --panel-2: #252522; --ink: #efeee9; --ink-2: #b4b3ac; --ink-3: #7f7e78;
     --line: #2f2f2b; --accent: #7b93f5; --accent-ink: #0f1430; --accent-soft: #232a4a; --ok: #5cc98a; --warn: #e0a84a; --bad: #f07a63;
-    --tip: #efeee9; --tip-ink: #121211; color-scheme: dark; }
+    --tip: #efeee9; --tip-ink: #121211; color-scheme: dark;
+    --inset: inset 0 2px 5px rgb(0 0 0 / 45%), inset 0 0 0 1px rgb(0 0 0 / 25%);
+    --bevel: inset 0 1px 0 rgb(255 255 255 / 6%), inset 0 -1px 0 rgb(0 0 0 / 35%); }
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 var(--font); }
@@ -122,6 +128,19 @@ iframe { width: 100%; height: 70vh; border: 1px solid var(--line); border-radius
 .error { color: var(--bad); font-weight: 500; min-height: 1.5em; }
 .ok { color: var(--ok); } .bad { color: var(--bad); }
 .soon { border: 1px dashed var(--line); border-radius: var(--radius); padding: 14px; color: var(--ink-3); }
+/* Retro: Futura for anything that names or labels, a spring on anything you can press, and pressed-in fields. */
+h1, h2, h3, .tab, .btn, .opt, .chip, .big, .stages b, .ask .count, .proj, .msg .who, th, label { font-family: var(--display); }
+h1 { letter-spacing: .02em; } h2, .ask .count, .msg .who, th { letter-spacing: .14em; }
+.btn, .opt, .tab, .proj, .icon, .chip, .stages li, .card, .ask, .input, textarea, select { transition: var(--spring); }
+.btn:hover:not(:disabled), .opt:hover, .proj:hover, .icon:hover { transform: translateY(-2px); }
+.btn:active:not(:disabled), .opt:active, .proj:active, .icon:active { transform: translateY(1px); box-shadow: var(--inset); }
+.input, textarea, select { box-shadow: var(--inset); }
+.input:focus, textarea:focus, select:focus { box-shadow: var(--inset), 0 0 0 3px var(--accent-soft); }
+.card, .ask, aside, .top, .btn, .icon { box-shadow: var(--bevel); }
+.ask { box-shadow: var(--bevel), 0 8px 28px rgb(0 0 0 / 8%); }
+.chip, .stages .n, .dot { box-shadow: var(--inset); }
+.opt { box-shadow: var(--bevel); } .opt.pick { box-shadow: var(--inset); }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 @media (max-width: 900px) {
   .layout, body.no-left .layout, body.no-right .layout { grid-template-columns: minmax(0, 1fr); }
   #left, main, #right { grid-column: 1; }
