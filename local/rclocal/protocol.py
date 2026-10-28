@@ -50,7 +50,9 @@ FILE_PLAN = _obj(
     imports=_list(STR),  # paths of other project files this one uses
 )
 
-GUESS = _obj(["text", "choice", "why", "options"], text=STR, choice=STR, why=STR, options=_list(STR))
+# One answer you can pick: a label of 2 or 3 words, and a sentence on what it means (shown on hover).
+OPTION = _obj(["label", "detail"], label=STR, detail=STR)
+GUESS = _obj(["text", "choice", "why", "options"], text=STR, choice=STR, why=STR, options=_list(OPTION))
 DECISION = _obj(["text", "choice", "why"], text=STR, choice=STR, why=STR)
 
 # A builder asking for something another file doesn't export yet. Additive only.
@@ -84,7 +86,7 @@ def _enum(*values):
 
 # A question for the user: always with options and the one the asker would pick, so
 # pressing Enter is a real answer.
-QUESTION = _obj(["text", "options", "default", "why"], text=STR, options=_list(STR), default=STR, why=STR)
+QUESTION = _obj(["text", "options", "default", "why"], text=STR, options=_list(OPTION), default=STR, why=STR)
 # What the app is, agreed with the user before building. Kept in .hub/brief.json and PROJECT.md.
 BRIEF = _obj(
     ["name", "pitch", "must_have", "nice_to_have", "out_of_scope", "look"],
@@ -183,6 +185,9 @@ EVENTS = {
     "note": ("text",),
     "page_fix": ("part", "reason"),
     "user_test": ("persona", "works", "problems"),
+    # A run waiting for your answers (with a deadline), and how the wait ended: answered, timed_out or stopped.
+    "waiting": ("questions", "until"),
+    "waited": ("how",),
 }
 
 

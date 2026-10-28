@@ -37,10 +37,12 @@ def full_state(desk):
     state["projects"] = projects()
     if hub:
         state["status"] = snapshot(hub, desk.llm_for(hub))
+        state["stage"] = desk.stage(state["status"])
         state["screens"] = sorted(p.name for p in (hub.root / "screens").glob("*.png")) if (hub.root / "screens").exists() else []
         state["questions"] = [q for q in hub.questions() if q["status"] == "open" or (q["status"] == "decided" and q["critical"])]
     else:
         state["status"] = {"resources": resources(OllamaClient())}
+        state["stage"] = None
         state["screens"], state["questions"] = [], []
     return state
 

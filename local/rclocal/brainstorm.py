@@ -48,11 +48,15 @@ class Brainstorm:
         if (self.hub.project / "PROJECT.md").exists() and self.hub.contracts.all():
             notes = (self.hub.project / "PROJECT.md").read_text(encoding="utf-8")[:5000]
         reply = await agents.brainstorm(sched, self.hub.stack, idea, notes, self.transcript(), turns_left)
-        reply["questions"] = [q for q in reply["questions"] if q["text"].strip()][:3]
-        for q in reply["questions"]:
-            q["options"] = [o for o in q["options"] if o.strip()][:4]
-            if q["default"].strip() and q["default"] not in q["options"]:
-                q["options"] = ([q["default"]] + q["options"])[:4]
+        questions = []
+        for asked in [q for q in reply["questions"] if q["text"].strip()][:3]:
+            # options as short labels, with what each means kept for hover
+            details = {" ".join(o["label"].split()): o["detail"].strip() for o in asked["options"] if o["label"].strip()}
+            options, default = list(details)[:4], " ".join(asked["default"].split())
+            if default and default not in options:
+                options = ([default] + options)[:4]
+            questions.append({**asked, "options": options, "details": details, "default": default})
+        reply = {**reply, "questions": questions}
         said_before = " ".join(t["text"] for t in self.talk if t["who"] == "brainstormer")
         reply["pushback"] = [p for p in reply["pushback"] if p.strip() and p.strip() not in said_before]
         project.save_brief(self.hub, reply["brief"])
@@ -69,9 +73,10 @@ class Brainstorm:
             text = question["default"] or (question["options"] or ["(no answer)"])[0]
         elif len(text) == 1 and text.lower() in LETTERS[: len(question["options"])]:
             text = question["options"][LETTERS.index(text.lower())]
+        details = question.get("details", {})
         q = self.hub.ask(
             HUB_OWNER, question["text"], critical=True, choice=question["default"] or text,
-            why=question["why"], options=question["options"],
+            why=question["why"], options=[{"label": o, "detail": details.get(o, "")} for o in question["options"]],
         )
         self.hub.answer(q["id"], text)
         self.talk.append({"who": "you", "text": f"{question['text']} -> {text}"})

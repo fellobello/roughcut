@@ -44,15 +44,16 @@ DEFAULT_CONFIG = {
     "max_parallel_calls": 2,  # model calls in flight at once, across all models
     "model_slots": {},  # per-model limit, e.g. {"qwen3:8b": 1}; default 1 each
     "max_parallel_tasks": 3,  # tasks per wave
-    "agent_steps": 10,  # actions a builder agent may take per attempt
+    "agent_steps": 14,  # actions a builder agent may take per attempt
     "design_tries": 3,  # page attempts before the design task gives up
     "test_users": 3,  # test users who try each new page (0 turns them off)
     "user_fixes": 2,  # times test users may send the page back, across all rounds
     "brainstorm_turns": 4,  # most back-and-forth turns before building starts
+    "answer_wait": 600,  # seconds a run waits for your answer to a blocking question, then takes the suggestion
     # Longest reply per call kind, in tokens. A model that loses track stops here instead of
     # writing until the call times out.
     "max_tokens": {
-        "brainstorm": 1500, "planner": 3000, "survey": 1200, "tester": 2500, "builder": 3500, "designer": 4000,
+        "brainstorm": 1500, "planner": 3000, "survey": 1200, "tester": 3000, "builder": 5000, "designer": 4000,
         "step": 300, "notes": 800, "page_part": 200, "user_plan": 900, "user_verdict": 700,
         "reviewer": 600, "reporter": 600,
     },
@@ -179,6 +180,30 @@ class LocalHub(Hub):
             task = self.task(task_id)
             task["notes"].append(text)
             self._save_task(task)
+
+    def ask(self, owner, text, critical=False, choice=None, why="", options=(), affects=(), suggested=None):
+        """Hub.ask, where options may be {label, detail} pairs (protocol.OPTION) as well as plain labels.
+
+        Labels are what's stored and shown; details go in the question's "details", for the
+        studio to show on hover. `suggested` is the answer a blocking question gets if
+        nobody answers in time (rounds.wait_for_answers).
+        """
+        labels, details = [], {}
+        for option in options:
+            if isinstance(option, dict):
+                label = " ".join(option.get("label", "").split())
+                if label and option.get("detail", "").strip():
+                    details[label] = option["detail"].strip()
+            else:
+                label = " ".join(str(option).split())
+            if label and label not in labels:
+                labels.append(label)
+        question = super().ask(owner, text, critical, choice, why, labels, affects)
+        if details or suggested:
+            with self.locked():
+                question.update(details=details, suggested=suggested)
+                self._write(self.questions_dir / f"{question['id']}.json", question)
+        return question
 
     def answered_since(self, round_no):
         """Questions answered after the given round was planned: what a new plan must take in."""

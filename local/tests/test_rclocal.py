@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 _HOME = tempfile.TemporaryDirectory()  # the project list and projects folder, kept out of your real ones
 os.environ["ROUGHCUT_LOCAL_HOME"] = str(Path(_HOME.name) / "home")
 os.environ["ROUGHCUT_PROJECTS"] = str(Path(_HOME.name) / "projects")
+os.environ["ROUGHCUT_QUIET"] = "1"  # no Mac notifications from tests
 
 from rclocal import pages, project, protocol  # noqa: E402
 from rclocal.brainstorm import Brainstorm  # noqa: E402
@@ -44,7 +45,8 @@ def plan_of(files, complete=True):
         "summary": "temperature converter",
         "files": files,
         "conventions": ["Round to one decimal place in text."],
-        "guesses": [{"text": "Which interface?", "choice": "functions only", "why": "smallest", "options": ["CLI"]}],
+        "guesses": [{"text": "Which interface?", "choice": "functions only", "why": "smallest",
+                     "options": [{"label": "functions only", "detail": "No command line."}, {"label": "CLI", "detail": "A command."}]}],
         "complete": complete,
     }
 
@@ -636,8 +638,11 @@ BRAINSTORM_REPLY = {
               "nice_to_have": ["history"], "out_of_scope": ["accounts"], "look": "warm and calm"},
     "pushback": ["I'd leave out accounts: everyone uses one shared screen."],
     "questions": [
-        {"text": "How do people vote?", "options": ["one vote each", "rank them"], "default": "one vote each", "why": ""},
-        {"text": "Keep a history?", "options": ["yes", "no"], "default": "no", "why": "smaller"},
+        {"text": "How do people vote?", "default": "one vote each", "why": "",
+         "options": [{"label": "one vote each", "detail": "Everyone picks one book."},
+                     {"label": "rank them", "detail": "Everyone orders their favourites."}]},
+        {"text": "Keep a history?", "default": "no", "why": "smaller",
+         "options": [{"label": "yes", "detail": "Past picks are kept."}, {"label": "no", "detail": "Only this month."}]},
     ],
     "ready": True,
 }
@@ -749,6 +754,44 @@ class TrialTest(unittest.TestCase):
         self.assertIn("How do people vote?", detail)
 
 
+class WaitTest(HubCase):
+    def stuck(self):
+        from rclocal.rounds import STUCK_OPTIONS
+
+        self.hub.add_task("app-x-py", "Build app/x.py", "build", "app/x.py")
+        return self.hub.ask("app-x-py", "app/x.py keeps failing", critical=True, options=STUCK_OPTIONS,
+                            suggested=STUCK_OPTIONS[0]["label"])
+
+    def test_a_stuck_file_takes_the_suggestion_when_nobody_answers(self):
+        from rclocal.rounds import wait_for_answers
+
+        q = self.stuck()
+        self.assertEqual(q["options"], ["Simplify it", "Change the contract", "Drop the file"])
+        self.assertIn("do less", q["details"]["Simplify it"])
+        self.assertEqual(wait_for_answers(self.hub, [q["id"]], 0.2, poll=0.05), "timed_out")
+        self.assertEqual(self.hub.question(q["id"])["answer"], "Simplify it")
+        self.assertEqual([e["type"] for e in self.hub.events.read()][-3:], ["waiting", "note", "waited"])
+
+    def test_an_answer_ends_the_wait(self):
+        from rclocal.rounds import wait_for_answers
+
+        q = self.stuck()
+        threading.Timer(0.1, lambda: self.hub.answer(q["id"], "Drop the file")).start()
+        self.assertEqual(wait_for_answers(self.hub, [q["id"]], 5, poll=0.05), "answered")
+        self.assertEqual(self.hub.question(q["id"])["answer"], "Drop the file")
+
+    @unittest.skipUnless(sys.platform == "darwin", "caffeinate is macOS only")
+    def test_the_mac_is_kept_awake_only_while_building(self):
+        from rclocal.notify import awake
+
+        with awake() as on:
+            self.assertTrue(on)
+            listed = subprocess.run(["pgrep", "-f", f"caffeinate -i -s -w {os.getpid()}"], capture_output=True)
+            self.assertEqual(listed.returncode, 0)
+        listed = subprocess.run(["pgrep", "-f", f"caffeinate -i -s -w {os.getpid()}"], capture_output=True)
+        self.assertNotEqual(listed.returncode, 0)
+
+
 class DeskTest(unittest.TestCase):
     """The studio's go-between, with a fake model: no AI is run."""
 
@@ -779,6 +822,13 @@ class DeskTest(unittest.TestCase):
         self.settle()
         answered = {q["text"]: q["answer"] for q in self.desk.hub.questions() if q["status"] == "answered"}
         self.assertEqual(answered, {"How do people vote?": "one vote each", "Keep a history?": "yes"})
+        vote = next(q for q in self.desk.hub.questions() if q["text"] == "How do people vote?")
+        self.assertEqual(vote["details"]["rank them"], "Everyone orders their favourites.")
+        self.assertIsNone(self.desk.stage())
+        self.desk.busy = "building"
+        self.assertEqual(self.desk.stage({"phase": "build", "tasks": [{"status": "in_progress", "module": "index.html"}]}), "page")
+        self.assertEqual(self.desk.stage({"phase": "fix", "tasks": []}), "verify")
+        self.desk.busy = None
         whos = [m["who"] for m in self.desk.chat()]
         self.assertEqual(whos[:3], ["desk", "you", "brainstormer"])
         self.assertTrue((self.desk.hub.project / "PROJECT.md").exists())

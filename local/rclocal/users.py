@@ -179,8 +179,12 @@ class TestUsers:
                 if p["where"] == "logic" and text not in asked:
                     q = hub.ask(
                         HUB_OWNER, text, critical=True,
-                        choice="left as it is for now", why="a test user can be wrong too, so you decide",
-                        options=["Fix it", "It's fine as it is"],
+                        choice="Leave it for now", why="a test user can be wrong too, so you decide",
+                        options=[
+                            {"label": "Fix it", "detail": "The planner looks at this result again next round and changes what it promises."},
+                            {"label": "It's fine", "detail": "The test user was wrong; nothing changes."},
+                            {"label": "Leave it for now", "detail": "Decide later; nothing changes until you do."},
+                        ],
                     )
                     self.events.emit("question", id=q["id"], text=q["text"], blocking=False)
 

@@ -22,11 +22,13 @@ import json
 import posixpath
 import re
 import subprocess
+import time
 
 from . import agents, pages, project
 from .contracts import ContractError, file_id
 from .hub_local import HUB_OWNER, HubError
 from .llm import LLMError
+from .notify import awake, notify
 from .runner import Runner
 from .scheduler import Scheduler
 from .stacks import filter_styles
@@ -37,7 +39,13 @@ CLOSE_FENCE = re.compile(r"\n?```\s*$")
 PAGE_IMPORT = re.compile(r"""import\s*\{([^}]*)\}\s*from\s*['"]\./(app/[^'"]+)['"]""")
 MAX_DECISIONS = 2  # per task; small models over-report
 MAX_GUESSES = 3  # per plan, so the questions you get are few and real
-KEEP_TURNS = 8  # agent messages kept after the opening two, so its context stays small
+# What you can say when a file is stuck. The first is what happens if you don't answer in time.
+STUCK_OPTIONS = [
+    {"label": "Simplify it", "detail": "Make this file do less, so it can pass: the planner trims what it promises next round."},
+    {"label": "Change the contract", "detail": "Tell the planner what this file should promise instead, in your own words."},
+    {"label": "Drop the file", "detail": "Take it out of the plan; anything that needs it is planned again without it."},
+]
+KEEP_TURNS = 12  # agent messages kept after the opening two, so its context stays small
 DESIGN_TASK = "page-design"
 VERIFY_PARALLEL = 3
 
@@ -388,7 +396,7 @@ class Round:
             else:  # ask
                 question = hub.ask(
                     task["id"], note or f"{path} can't keep its contract. What should change?", critical=True,
-                    options=["Change the contract", "Drop this file", "Simplify what it does"],
+                    options=STUCK_OPTIONS, suggested=STUCK_OPTIONS[0]["label"],
                 )
                 self.events.emit("question", id=question["id"], text=question["text"], blocking=True)
                 return "blocked", f"asked you: {question['text']}", None
@@ -451,7 +459,7 @@ class Round:
             task["id"],
             f"{contract['path']}: {what} ({reason}). What should change?",
             critical=True,
-            options=["Change the contract", "Drop this file", "Simplify what it does"],
+            options=STUCK_OPTIONS, suggested=STUCK_OPTIONS[0]["label"],
         )
         self.events.emit("question", id=question["id"], text=question["text"], blocking=True)
         return "blocked", f"needs your answer: {reason}", None
@@ -606,7 +614,7 @@ class Round:
                 critical=critical,
                 choice=decision["choice"].strip() or "(not given)",
                 why=decision.get("why", ""),
-                options=[o for o in decision.get("options", []) if o.strip()],
+                options=[o for o in decision.get("options", []) if (o.get("label", "") if isinstance(o, dict) else o).strip()],
             )
         except HubError as e:
             self.events.emit("note", text=f"couldn't record a decision: {e}")
@@ -682,29 +690,71 @@ class Round:
         commit(self.hub.project, message)
 
 
-def run_rounds(hub, llm, rounds, echo=None, stop=lambda: False):
-    """Run up to `rounds` rounds in a row. Returns (summaries, why it stopped).
+def run_rounds(hub, llm, rounds, echo=None, stop=lambda: False, wait=None):
+    """Run up to `rounds` rounds in a row, keeping the Mac awake. Returns (summaries, why it stopped).
 
-    Stops early when a question blocks work, when the planner says the idea is covered and
-    every test passes, when a round makes no progress, or when stop() says so (checked
-    between rounds; a round in progress always finishes).
+    When a round ends with questions that block work, you get a notification and the run
+    waits up to `wait` seconds (the config's `answer_wait` if None; 0 stops instead) for
+    your answers, then takes each question's suggested answer and goes on. It also stops
+    when the planner says the idea is covered and every test passes, when a round makes no
+    progress, or when stop() says so (checked between rounds and while waiting).
     """
+    wait = hub.local_config()["answer_wait"] if wait is None else wait
     summaries = []
-    for _ in range(rounds):
-        before = sum(t["status"] == "done" for t in hub.tasks())
-        summary = asyncio.run(Round(hub, llm, echo=echo).run())
-        summaries.append(summary)
-        after = sum(t["status"] == "done" for t in hub.tasks())
-        todo = any(t["status"] == "todo" for t in hub.tasks())
-        if summary["open_questions"]:
-            return summaries, "some questions need your answer"
-        if summary["complete"] and not todo and summary["tests_passed"]:
-            return summaries, "the planner says the idea is covered and every test passes"
-        if after == before and not todo:
-            return summaries, "the last round made no progress"
-        if stop():
-            return summaries, "you asked it to stop"
+    with awake():
+        for n in range(rounds):
+            before = sum(t["status"] == "done" for t in hub.tasks())
+            summary = asyncio.run(Round(hub, llm, echo=echo).run())
+            summaries.append(summary)
+            after = sum(t["status"] == "done" for t in hub.tasks())
+            todo = any(t["status"] == "todo" for t in hub.tasks())
+            if summary["open_questions"]:
+                if not wait or n == rounds - 1:
+                    return summaries, "some questions need your answer"
+                how = wait_for_answers(hub, summary["open_questions"], wait, stop)
+                if how == "stopped":
+                    return summaries, "you asked it to stop"
+                continue
+            if summary["complete"] and not todo and summary["tests_passed"]:
+                return summaries, "the planner says the idea is covered and every test passes"
+            if after == before and not todo:
+                return summaries, "the last round made no progress"
+            if stop():
+                return summaries, "you asked it to stop"
     return summaries, f"ran the {rounds} round{'s' if rounds != 1 else ''} asked for"
+
+
+def wait_for_answers(hub, question_ids, seconds, stop=lambda: False, poll=2.0):
+    """Wait for blocking questions to be answered. Returns "answered", "timed_out" or "stopped".
+
+    On time out, each question still open gets its suggested answer (or its first option),
+    so an overnight run loses minutes, not the night.
+    """
+    events = hub.events
+    texts = [hub.question(q)["text"] for q in question_ids]
+    minutes = max(1, round(seconds / 60))
+    notify(f"{texts[0][:120]} I'll go with my suggestion in {minutes} min unless you answer.", "Roughcut Local needs you")
+    events.emit("waiting", questions=list(question_ids), until=time.time() + seconds)
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        still = [q for q in question_ids if hub.question(q)["status"] == "open"]
+        if not still:
+            events.emit("waited", how="answered")
+            return "answered"
+        if stop():
+            events.emit("waited", how="stopped")
+            return "stopped"
+        time.sleep(poll)
+    for qid in question_ids:
+        question = hub.question(qid)
+        if question["status"] != "open":
+            continue
+        pick = question.get("suggested") or (question["options"] or ["Simplify it"])[0]
+        hub.answer(qid, pick)
+        events.emit("note", text=f"no answer in {minutes} min to {qid}: went with \"{pick}\"")
+    hub.render()
+    events.emit("waited", how="timed_out")
+    return "timed_out"
 
 
 def commit(folder, message):

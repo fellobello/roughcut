@@ -8,25 +8,37 @@
 :root {
   --bg: #f6f6f3; --panel: #ffffff; --panel-2: #f1f1ed; --ink: #1b1b19; --ink-2: #55554f; --ink-3: #8a8a83;
   --line: #e4e3dd; --accent: #3b5bdb; --accent-ink: #fff; --accent-soft: #e8edff; --ok: #1f8a4c; --warn: #b7791f; --bad: #c2361f;
+  --tip: #1b1b19; --tip-ink: #f6f6f3;
   --radius: 12px; --font: system-ui, -apple-system, "Segoe UI", sans-serif; --mono: ui-monospace, "SF Mono", Menlo, monospace;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root { --bg: #121211; --panel: #1c1c1a; --panel-2: #252522; --ink: #efeee9; --ink-2: #b4b3ac; --ink-3: #7f7e78;
     --line: #2f2f2b; --accent: #7b93f5; --accent-ink: #0f1430; --accent-soft: #232a4a; --ok: #5cc98a; --warn: #e0a84a; --bad: #f07a63;
-    color-scheme: dark; }
+    --tip: #efeee9; --tip-ink: #121211; color-scheme: dark; }
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 var(--font); }
 button, input, select, textarea { font: inherit; color: inherit; }
-.top { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 2; }
+.top { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 5; }
 .top h1 { font-size: 16px; margin: 0; letter-spacing: -.01em; }
-.top .where { color: var(--ink-2); }
-.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+.top .where { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 200px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { padding: 2px 10px; border-radius: 999px; background: var(--panel-2); color: var(--ink-2); font-size: 12px; white-space: nowrap; }
 .chip.busy { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
-.layout { display: grid; grid-template-columns: 280px 1fr; min-height: calc(100vh - 53px); }
-aside { border-right: 1px solid var(--line); padding: 16px; display: grid; gap: 18px; align-content: start; background: var(--panel); }
+.icon { width: 34px; height: 34px; display: inline-grid; place-items: center; border: 1px solid var(--line); background: var(--panel); border-radius: 9px; cursor: pointer; color: var(--ink-2); }
+.icon:hover { color: var(--ink); border-color: var(--ink-3); }
+.icon.on { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+.icon svg { width: 18px; height: 18px; }
+.layout { display: grid; grid-template-columns: 270px minmax(0, 1fr) 250px; min-height: calc(100vh - 55px); }
+body.no-left .layout { grid-template-columns: 0 minmax(0, 1fr) 250px; }
+body.no-right .layout { grid-template-columns: 270px minmax(0, 1fr) 0; }
+body.no-left.no-right .layout { grid-template-columns: 0 minmax(0, 1fr) 0; }
+body.no-left #left, body.no-right #right { display: none; }
+#left { grid-column: 1; } main { grid-column: 2; } #right { grid-column: 3; }  /* each keeps its place when another hides */
+aside { padding: 16px; display: grid; gap: 18px; align-content: start; background: var(--panel); min-width: 0; }
+#left { border-right: 1px solid var(--line); }
+#right { border-left: 1px solid var(--line); }
 main { padding: 16px; min-width: 0; }
 h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3); margin: 0 0 8px; }
 .list { display: grid; gap: 4px; }
@@ -50,26 +62,59 @@ textarea { resize: vertical; min-height: 64px; }
 .panel { display: none; } .panel.on { display: block; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; margin-bottom: 12px; min-width: 0; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
-.chat { display: grid; gap: 10px; max-height: 52vh; overflow-y: auto; padding: 4px; }
+.chat { display: grid; gap: 10px; max-height: 50vh; overflow-y: auto; padding: 4px; }
 .msg { max-width: 760px; padding: 10px 14px; border-radius: 14px; white-space: pre-wrap; }
 .msg.you { justify-self: end; background: var(--accent); color: var(--accent-ink); border-bottom-right-radius: 4px; }
 .msg.brainstormer { background: var(--panel); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
 .msg.desk { background: var(--panel-2); color: var(--ink-2); font-size: 13px; }
 .msg .who { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; opacity: .7; margin-bottom: 2px; }
-.q { border: 1px solid var(--line); border-radius: 12px; padding: 12px; background: var(--panel); }
-.q p { margin: 0 0 8px; font-weight: 600; } .q .why { font-weight: 400; color: var(--ink-3); font-size: 13px; }
-.opts { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
-.opt { border: 1px solid var(--line); background: var(--panel-2); border-radius: 999px; padding: 4px 12px; cursor: pointer; }
-.opt.pick { border-color: var(--accent); }
-.opt.pick::after { content: "  ← pick"; color: var(--ink-3); font-size: 12px; }
+
+/* A question, focused: its own box, short answers, the meaning of each on hover. */
+.ask { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 18px; box-shadow: 0 8px 28px rgb(0 0 0 / 8%); margin-bottom: 12px; }
+.ask .count { font-size: 12px; color: var(--ink-3); text-transform: uppercase; letter-spacing: .06em; }
+.ask h3 { font-size: 17px; margin: 4px 0 4px; line-height: 1.35; }
+.ask .why { color: var(--ink-3); font-size: 13px; margin: 0 0 12px; }
+.opts { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.opt { position: relative; border: 1px solid var(--line); background: var(--panel-2); border-radius: 10px; padding: 8px 14px; cursor: pointer; font-weight: 600; }
+.opt:hover, .opt:focus-visible { border-color: var(--accent); outline: none; }
+.opt.pick { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.opt.pick::before { content: "★ "; font-size: 11px; }
+.opt[data-detail]:hover::after, .opt[data-detail]:focus-visible::after {
+  content: attr(data-detail); position: absolute; left: 0; top: calc(100% + 6px); width: max-content; max-width: 280px;
+  background: var(--tip); color: var(--tip-ink); padding: 8px 10px; border-radius: 8px; font-weight: 400; font-size: 13px;
+  line-height: 1.4; z-index: 20; box-shadow: 0 6px 20px rgb(0 0 0 / 20%); white-space: normal; pointer-events: none; }
 .answered { color: var(--ok); font-weight: 600; }
+.steps { display: flex; gap: 6px; align-items: center; margin-top: 12px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line); }
+.dot.on { background: var(--accent); }
+
+/* The time-sensitive box: a file is stuck and the run is waiting on you. */
+.urgent { position: fixed; inset: 0; background: rgb(0 0 0 / 45%); display: grid; place-items: center; z-index: 30; padding: 16px; }
+.urgent[hidden] { display: none; }
+.urgent .ask { width: min(560px, 100%); border-color: var(--warn); margin: 0; }
+.clock { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--warn); }
+
+/* The cycle, in the right column. */
+.stages { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.stages li { display: grid; grid-template-columns: 24px 1fr; gap: 8px; padding: 8px; border-radius: 10px; color: var(--ink-3); }
+.stages li b { display: block; color: var(--ink-2); font-weight: 600; }
+.stages li small { font-size: 12px; line-height: 1.35; }
+.stages .n { width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--line); display: grid; place-items: center; font-size: 11px; font-weight: 700; }
+.stages li.past .n { background: var(--ok); border-color: var(--ok); color: var(--panel); }
+.stages li.now { background: var(--accent-soft); }
+.stages li.now b { color: var(--accent); }
+.stages li.now .n { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); animation: pulse 1.6s ease-in-out infinite; }
+.stages li.you.now { background: color-mix(in srgb, var(--warn) 15%, transparent); }
+.stages li.you.now b { color: var(--warn); } .stages li.you.now .n { background: var(--warn); border-color: var(--warn); }
+@keyframes pulse { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 25%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .stages li.now .n { animation: none; } }
+
 table { width: 100%; border-collapse: collapse; } td, th { text-align: left; padding: 6px 8px; border-top: 1px solid var(--line); vertical-align: top; }
 th { color: var(--ink-3); font-weight: 500; border-top: 0; font-size: 12px; }
 .mono { font-family: var(--mono); font-size: 12.5px; } .muted { color: var(--ink-3); }
 .done { color: var(--ok); } .in_progress { color: var(--accent); } .failed { color: var(--bad); } .blocked { color: var(--warn); }
 .log { max-height: 300px; overflow: auto; } .log div { padding: 3px 0; border-top: 1px solid var(--line); }
 .big { font-size: 22px; font-weight: 700; }
-.bar { height: 6px; background: var(--panel-2); border-radius: 3px; overflow: hidden; margin-top: 6px; } .bar i { display: block; height: 100%; background: var(--accent); }
 .shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
 .shots figure { margin: 0; } .shots img { width: 100%; border: 1px solid var(--line); border-radius: 8px; } .shots figcaption { font-size: 12px; color: var(--ink-3); }
 iframe { width: 100%; height: 70vh; border: 1px solid var(--line); border-radius: var(--radius); background: #fff; }
@@ -77,16 +122,24 @@ iframe { width: 100%; height: 70vh; border: 1px solid var(--line); border-radius
 .error { color: var(--bad); font-weight: 500; min-height: 1.5em; }
 .ok { color: var(--ok); } .bad { color: var(--bad); }
 .soon { border: 1px dashed var(--line); border-radius: var(--radius); padding: 14px; color: var(--ink-3); }
-@media (max-width: 760px) { .layout { grid-template-columns: 1fr; } aside { border-right: 0; border-bottom: 1px solid var(--line); } }
+@media (max-width: 900px) {
+  .layout, body.no-left .layout, body.no-right .layout { grid-template-columns: minmax(0, 1fr); }
+  #left, main, #right { grid-column: 1; }
+  #left, #right { border: 0; border-bottom: 1px solid var(--line); }
+}
 </style>
 </head>
 <body>
 <div class="top">
+  <button class="icon on" id="leftBtn" title="Show or hide projects" aria-label="Show or hide projects">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button>
   <h1>Roughcut Local</h1><span class="where" id="where">No project open</span>
   <div class="chips" id="chips"></div>
+  <button class="icon on" id="rightBtn" title="Show or hide the cycle" aria-label="Show or hide the cycle">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg></button>
 </div>
 <div class="layout">
-<aside>
+<aside id="left">
   <section>
     <h2>Projects</h2>
     <div class="list" id="projects"><span class="muted">None yet.</span></div>
@@ -116,14 +169,14 @@ iframe { width: 100%; height: 70vh; border: 1px solid var(--line); border-radius
 
   <section class="panel on" id="talk">
     <div class="card"><div class="chat" id="chat"></div></div>
-    <div class="stack" id="pending"></div>
+    <div id="pending"></div>
     <div class="card stack">
       <textarea id="say" placeholder="Talk it through: what it's for, who uses it, what to leave out… (Enter sends, Shift+Enter for a new line)"></textarea>
       <div class="row">
         <button class="btn primary" id="sayBtn">Send</button>
-        <button class="btn" id="moreBtn" title="Answer the rest with the picks and ask the next questions">Keep talking</button>
+        <button class="btn" id="moreBtn" title="Questions you haven't answered take the ★ pick, then it asks the next ones">Keep talking</button>
         <span style="flex:1"></span>
-        <label class="muted">Rounds <input class="input" id="rounds" type="number" min="1" max="10" value="" placeholder="auto" style="width:70px"></label>
+        <label class="muted">Rounds <input class="input" id="rounds" type="number" min="1" max="10" placeholder="auto" style="width:70px"></label>
         <button class="btn primary" id="buildBtn">Build</button>
       </div>
     </div>
@@ -143,8 +196,8 @@ iframe { width: 100%; height: 70vh; border: 1px solid var(--line); border-radius
   </section>
 
   <section class="panel" id="questions">
-    <p class="muted">Guesses the models made so work didn't wait, and questions that block work. Click an option, or type your own answer. Changing a guess rebuilds what was built on it, next round.</p>
-    <div class="stack" id="qlist"></div>
+    <div id="qbox"></div>
+    <p class="muted" style="font-size:13px">★ is what the models picked so work didn't wait. Hover an answer to see what it means. Changing a pick rebuilds what was built on it, next round.</p>
   </section>
 
   <section class="panel" id="app">
@@ -155,23 +208,35 @@ iframe { width: 100%; height: 70vh; border: 1px solid var(--line); border-radius
 
   <section class="panel" id="models">
     <div class="card"><h2>Ollama</h2><div id="ollama" class="muted">Checking…</div></div>
-    <div class="card"><h2>Who does what</h2><p class="muted" id="modelsNote">Pick a model for any role; it's used from the next call on.</p>
+    <div class="card"><h2>Who does what</h2><p class="muted">Pick a model for any role; it's used from the next call on.</p>
       <div style="overflow-x:auto"><table><thead><tr><th>Role</th><th>Job</th><th>Model</th></tr></thead><tbody id="roles"></tbody></table></div>
       <div class="ok" id="modelSaved"></div></div>
     <div class="card"><h2>Limits</h2><div id="limits" class="mono muted"></div></div>
     <div class="soon"><strong>Coming later:</strong> performance tuning here: how many calls run at once, context size, how many test users and fixes each round may spend, and presets like "fast draft" and "overnight".</div>
   </section>
 </main>
+<aside id="right">
+  <section>
+    <h2>The cycle</h2>
+    <ol class="stages" id="stages"></ol>
+  </section>
+  <section><h2>Now</h2><div id="now" class="muted" style="font-size:13px">Nothing running.</div></section>
+</aside>
 </div>
+
+<div class="urgent" id="urgent" hidden role="dialog" aria-modal="true" aria-labelledby="urgentTitle"></div>
+
 <script>
 const TOKEN = "__TOKEN__";
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const gb = b => (b / 2 ** 30).toFixed(1) + " GB";
-let state = null, modelsLoaded = false, lastChat = -1;
+let state = null, modelsLoaded = false, lastChat = -1, qIndex = 0, hiddenUrgent = "";
 const drawn = {};
 // Redraw a section only when its data changed, so typing in it isn't wiped.
 const changed = (key, data) => { const j = JSON.stringify(data); if (drawn[key] === j) return false; drawn[key] = j; return true; };
+const remember = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
+const recall = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
 
 async function post(action, body = {}) {
   $("error").textContent = "";
@@ -182,13 +247,22 @@ async function post(action, body = {}) {
   return data;
 }
 
-document.querySelectorAll(".tab").forEach(t => t.onclick = () => {
-  document.querySelectorAll(".tab").forEach(x => x.classList.toggle("on", x === t));
-  document.querySelectorAll(".panel").forEach(p => p.classList.toggle("on", p.id === t.dataset.tab));
-  if (t.dataset.tab === "models") loadModels();
-});
+// Side columns open and close, and stay that way next time.
+function side(which, open) {
+  document.body.classList.toggle("no-" + which, !open);
+  $(which + "Btn").classList.toggle("on", open);
+  remember("side-" + which, open ? "1" : "0");
+}
+["left", "right"].forEach(w => { side(w, recall("side-" + w) !== "0"); $(w + "Btn").onclick = () => side(w, document.body.classList.contains("no-" + w)); });
 
-$("newBtn").onclick = () => post("new", { idea: $("idea").value, stack: $("stack").value }).then(() => { $("idea").value = ""; });
+document.querySelectorAll(".tab").forEach(t => t.onclick = () => showTab(t.dataset.tab));
+function showTab(name) {
+  document.querySelectorAll(".tab").forEach(x => x.classList.toggle("on", x.dataset.tab === name));
+  document.querySelectorAll(".panel").forEach(p => p.classList.toggle("on", p.id === name));
+  if (name === "models") loadModels();
+}
+
+$("newBtn").onclick = () => post("new", { idea: $("idea").value, stack: $("stack").value }).then(() => { $("idea").value = ""; showTab("talk"); });
 $("openBtn").onclick = () => post("bring-in", { target: $("target").value }).then(() => { $("target").value = ""; modelsLoaded = false; });
 $("sayBtn").onclick = () => { const text = $("say").value; if (text.trim()) post("say", { text }).then(() => { $("say").value = ""; }); };
 $("say").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("sayBtn").click(); } });
@@ -202,49 +276,63 @@ $("appBtn").onclick = () => post("app").then(d => {
   $("appLink").href = d.url; $("appLink").textContent = "Open in a new tab ↗";
 });
 
+// One question in its own box. answer(value) is called with the label picked or typed.
+function askBox({ count, title, why, options, details = {}, pick, extra = "", id }) {
+  return `<div class="ask" data-ask="${esc(id)}">
+    ${count ? `<div class="count">${esc(count)}</div>` : ""}
+    <h3 ${title.id ? `id="${title.id}"` : ""}>${esc(title.text || title)}</h3>${why ? `<p class="why">${esc(why)}</p>` : ""}
+    <div class="opts">${options.map(o => `<button class="opt ${o === pick ? "pick" : ""}" data-value="${esc(o)}" ${details[o] ? `data-detail="${esc(details[o])}"` : ""}>${esc(o)}</button>`).join("")}</div>
+    <div class="row"><input class="input" style="flex:1" placeholder="Something else? Type your own answer" data-own><button class="btn" data-ownbtn>Answer</button></div>
+    ${extra}</div>`;
+}
+function wireAsk(root, answer) {
+  root.querySelectorAll("[data-ask]").forEach(box => {
+    box.querySelectorAll(".opt").forEach(b => b.onclick = () => answer(box.dataset.ask, b.dataset.value, b.classList.contains("pick")));
+    const own = box.querySelector("[data-own]");
+    const send = () => { if (own.value.trim()) answer(box.dataset.ask, own.value.trim(), false); };
+    box.querySelector("[data-ownbtn]").onclick = send;
+    own.addEventListener("keydown", e => { if (e.key === "Enter") send(); });
+  });
+}
+
 function chips(s) {
   const r = s.status.resources, m = r.memory, out = [];
   if (s.busy) out.push(`<span class="chip busy">${esc(s.busy)}${s.stopping ? " · stopping after this round" : ""}…</span>`);
   if (m) out.push(`<span class="chip">Memory ${gb(m.used)} / ${gb(m.total)}</span>`);
-  out.push(`<span class="chip">CPU ${r.load[0]} / ${r.cores} cores</span>`);
-  out.push(`<span class="chip">${r.ollama.up ? "Ollama: " + (r.ollama.loaded.map(x => esc(x.name)).join(", ") || "no model loaded") : "Ollama is not running"}</span>`);
-  if (s.status.box) out.push(`<span class="chip">${s.status.box.sandbox ? "Sandboxed" : "Limits only"}</span>`);
+  out.push(`<span class="chip">CPU ${r.load[0]} / ${r.cores}</span>`);
+  out.push(`<span class="chip">${r.ollama.up ? "Ollama: " + (r.ollama.loaded.map(x => esc(x.name)).join(", ") || "idle") : "Ollama is not running"}</span>`);
   $("chips").innerHTML = out.join("");
 }
 
 function projectList(s) {
+  if (!changed("projects", [s.projects, s.project && s.project.path])) return;
   $("projects").innerHTML = s.projects.length ? s.projects.map(p =>
     `<button class="proj ${s.project && s.project.path === p.path ? "on" : ""}" data-path="${esc(p.path)}">${esc(p.name)}<small>round ${p.round} · ${esc(p.stack)} · ${esc(p.updated)}</small></button>`).join("")
     : '<span class="muted">None yet.</span>';
-  document.querySelectorAll(".proj").forEach(b => b.onclick = () => post("open", { path: b.dataset.path }).then(() => { modelsLoaded = false; lastChat = -1; clearApp(); }));
+  document.querySelectorAll(".proj").forEach(b => b.onclick = () => post("open", { path: b.dataset.path }).then(() => { modelsLoaded = false; lastChat = -1; qIndex = 0; clearApp(); }));
 }
 
 function talk(s) {
   const chat = s.chat || [];
   if (chat.length !== lastChat) {
-    $("chat").innerHTML = chat.length ? chat.map(m => {
-      const qs = (m.questions || []).map((q, i) => `\n${i + 1}. ${q.text}`).join("");
-      return `<div class="msg ${esc(m.who)}"><div class="who">${esc(m.who === "you" ? "You" : m.who)}</div>${esc(m.text + qs)}</div>`;
-    }).join("") : `<div class="empty">${s.project ? "Say what you'd like to build or change." : "Pick a project on the left, or start a new one."}</div>`;
+    $("chat").innerHTML = chat.length ? chat.map(m =>
+      `<div class="msg ${esc(m.who)}"><div class="who">${esc(m.who === "you" ? "You" : m.who)}</div>${esc(m.text)}</div>`).join("")
+      : `<div class="empty">${s.project ? "Say what you'd like to build or change." : "Pick a project on the left, or start a new one."}</div>`;
     $("chat").scrollTop = $("chat").scrollHeight;
     lastChat = chat.length;
   }
-  if (changed("pending", s.pending)) { $("pending").innerHTML = s.pending.map(p => {
-    const q = p.question;
-    if (p.answer !== null) return `<div class="q"><p>${esc(q.text)}</p><span class="answered">→ ${esc(p.answer)}</span></div>`;
-    return `<div class="q"><p>${esc(q.text)} <span class="why">${esc(q.why)}</span></p>
-      <div class="opts">${q.options.map(o => `<button class="opt ${o === q.default ? "pick" : ""}" data-i="${p.index}" data-v="${esc(o)}">${esc(o)}</button>`).join("")}</div>
-      <div class="row"><input class="input" style="flex:1" placeholder="Or your own answer" data-own="${p.index}"><button class="btn" data-ownbtn="${p.index}">Answer</button></div></div>`;
-  }).join("");
-  document.querySelectorAll(".opt").forEach(b => b.onclick = () => post("answer", { index: b.dataset.i, reply: b.dataset.v }));
-  document.querySelectorAll("[data-ownbtn]").forEach(b => b.onclick = () => {
-    const box = document.querySelector(`[data-own="${b.dataset.ownbtn}"]`);
-    if (box.value.trim()) post("answer", { index: b.dataset.ownbtn, reply: box.value });
-  }); }
+  if (changed("pending", s.pending)) {
+    const open = s.pending.filter(p => p.answer === null);
+    const done = s.pending.filter(p => p.answer !== null);
+    $("pending").innerHTML = done.map(p => `<div class="card"><strong>${esc(p.question.text)}</strong> <span class="answered">→ ${esc(p.answer)}</span></div>`).join("")
+      + (open.length ? askBox({ id: open[0].index, count: `Question ${done.length + 1} of ${s.pending.length}`, title: open[0].question.text,
+          why: open[0].question.why, options: open[0].question.options, details: open[0].question.details || {}, pick: open[0].question.default }) : "");
+    wireAsk($("pending"), (index, reply) => post("answer", { index, reply }));
+  }
   const off = !s.project || !!s.busy;
-  ["sayBtn", "moreBtn", "buildBtn", "buildBtn2"].forEach(id => $(id).disabled = off);
-  $("moreBtn").disabled = off || !s.pending.length;
-  $("stopBtn").disabled = !s.busy || s.busy !== "building" || s.stopping;
+  ["sayBtn", "buildBtn", "buildBtn2"].forEach(id => $(id).disabled = off);
+  $("moreBtn").disabled = off || !s.pending.some(p => p.answer === null);
+  $("stopBtn").disabled = s.busy !== "building" || s.stopping;
 }
 
 function buildPanel(s) {
@@ -257,37 +345,68 @@ function buildPanel(s) {
     || '<tr><td colspan="5" class="muted">No tasks yet: talk it through, then Build.</td></tr>';
   $("speed").innerHTML = Object.entries(st.models).map(([k, v]) => `<tr><td class="mono">${esc(k)}</td><td>${v.calls}</td><td>${v.seconds}s</td><td>${v.tokens_per_second}</td></tr>`).join("")
     || '<tr><td colspan="4" class="muted">No calls yet.</td></tr>';
-  const line = e => {
-    const t = new Date(e.ts * 1000).toLocaleTimeString();
-    const f = { phase: `phase: ${e.name}`, task_start: `start ${e.task}`, task_end: `${e.task}: ${e.status}. ${e.summary}`,
-      llm_end: `${e.role} ${e.label}: ${e.seconds}s, ${e.tokens_per_second} tok/s`, llm_error: `${e.role} ${e.label} failed: ${e.error}`,
-      tests: `tests ${e.target}: ${e.passed ? "pass" : "fail"}`, contract: `contract ${e.path} v${e.version}`, question: `${e.blocking ? "question" : "decision"}: ${e.text}`,
-      agent_step: `${e.task} step ${e.step}: ${e.action}`, blocked_code: `guard blocked ${e.path}`, page_fix: `page: fixing only the ${e.part}`,
-      user_test: `test user ${e.persona}: ${e.works ? "it works" : (e.problems || []).join("; ")}`, note: e.text, round_start: "round started", round_end: "round finished" }[e.type] || e.type;
-    return `<div><span class="muted">${t}</span> ${esc(f)}</div>`;
+  const say = {
+    phase: e => `phase: ${e.name}`, task_start: e => `start ${e.task}`, task_end: e => `${e.task}: ${e.status}. ${e.summary}`,
+    llm_end: e => `${e.role} ${e.label}: ${e.seconds}s, ${e.tokens_per_second} tok/s`, llm_error: e => `${e.role} ${e.label} failed: ${e.error}`,
+    tests: e => `tests ${e.target}: ${e.passed ? "pass" : "fail"}`, contract: e => `contract ${e.path} v${e.version}`,
+    question: e => `${e.blocking ? "question" : "decision"}: ${e.text}`, agent_step: e => `${e.task} step ${e.step}: ${e.action}`,
+    blocked_code: e => `guard blocked ${e.path}`, page_fix: e => `page: fixing only the ${e.part}`,
+    user_test: e => `test user ${e.persona}: ${e.works ? "it works" : (e.problems || []).join("; ")}`, note: e => e.text,
+    waiting: e => "waiting for your answer", waited: e => `waited: ${e.how.replace("_", " ")}`,
+    round_start: e => "round started", round_end: e => "round finished",
   };
-  $("log").innerHTML = st.events.slice().reverse().map(line).join("") || '<span class="muted">Nothing yet.</span>';
+  if (changed("log", st.events.length && st.events[st.events.length - 1].ts))
+    $("log").innerHTML = st.events.slice().reverse().map(e =>
+      `<div><span class="muted">${new Date(e.ts * 1000).toLocaleTimeString()}</span> ${esc((say[e.type] || (x => x.type))(e))}</div>`).join("") || '<span class="muted">Nothing yet.</span>';
 }
 
-function questionList(s) {
+function questionTab(s) {
   const qs = s.questions;
   $("qn").hidden = !qs.length; $("qn").textContent = qs.length;
-  if (!changed("questions", qs)) return;
-  $("qlist").innerHTML = qs.length ? qs.map(q => {
-    const opts = [...new Set([q.choice, ...q.options].filter(Boolean))];
-    return `<div class="q"><p>${esc(q.text)} <span class="why">${esc(q.why)}</span></p>
-      <div class="opts">${opts.map(o => `<button class="opt ${o === q.choice ? "pick" : ""}" data-qid="${esc(q.id)}" data-v="${esc(o)}">${esc(o)}</button>`).join("")}</div>
-      <div class="row"><input class="input" style="flex:1" placeholder="Or your own answer" data-qown="${esc(q.id)}"><button class="btn" data-qbtn="${esc(q.id)}">Answer</button>
-      <span class="muted mono">${esc(q.id)}${q.status === "open" ? " · blocks work" : " · guess"}</span></div></div>`;
-  }).join("") : '<div class="empty">Nothing needs you right now.</div>';
-  document.querySelectorAll("[data-qid]").forEach(b => b.onclick = () => {
-    const keep = b.classList.contains("pick");
-    post("question", keep ? { id: b.dataset.qid, keep: true } : { id: b.dataset.qid, text: b.dataset.v });
-  });
-  document.querySelectorAll("[data-qbtn]").forEach(b => b.onclick = () => {
-    const box = document.querySelector(`[data-qown="${b.dataset.qbtn}"]`);
-    if (box.value.trim()) post("question", { id: b.dataset.qbtn, text: box.value });
-  });
+  if (!changed("questions", [qs, qIndex])) return;
+  if (!qs.length) { $("qbox").innerHTML = '<div class="empty">Nothing needs you right now.</div>'; return; }
+  qIndex = Math.min(qIndex, qs.length - 1);
+  const q = qs[qIndex];
+  const options = [...new Set([q.choice, ...q.options].filter(Boolean))];
+  const nav = `<div class="steps"><button class="btn" data-nav="-1" ${qIndex ? "" : "disabled"}>‹</button>
+    ${qs.map((_, i) => `<span class="dot ${i === qIndex ? "on" : ""}"></span>`).join("")}
+    <button class="btn" data-nav="1" ${qIndex < qs.length - 1 ? "" : "disabled"}>›</button>
+    <span class="muted mono" style="margin-left:auto">${esc(q.id)} · ${q.status === "open" ? "blocks work" : "a guess"}</span></div>`;
+  $("qbox").innerHTML = askBox({ id: q.id, count: `${qIndex + 1} of ${qs.length}${q.status === "open" ? " · needs you" : ""}`, title: q.text,
+    why: q.why, options, details: q.details || {}, pick: q.choice || q.suggested, extra: nav });
+  wireAsk($("qbox"), (id, value, isPick) => post("question", isPick && q.choice ? { id, keep: true } : { id, text: value }));
+  $("qbox").querySelectorAll("[data-nav]").forEach(b => b.onclick = () => { qIndex += Number(b.dataset.nav); drawn.questions = ""; questionTab(state); });
+}
+
+// A run is waiting on you: a box in front of everything, with the time left.
+function urgent(s) {
+  const w = s.waiting, box = $("urgent");
+  const q = w && w.questions[0];
+  if (!q || hiddenUrgent === q.id) { box.hidden = true; drawn.urgent = ""; return; }
+  box.hidden = false;
+  const left = Math.max(0, Math.round(w.until - Date.now() / 1000));
+  const clock = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
+  const pick = q.suggested || q.options[0];
+  if (changed("urgent", q.id)) {
+    box.innerHTML = askBox({ id: q.id, count: "A file is stuck", title: { text: q.text, id: "urgentTitle" }, options: q.options, details: q.details || {}, pick,
+      extra: `<p class="muted" style="margin:12px 0 0">Going with <strong>${esc(pick)}</strong> in <span class="clock" id="clock">${clock}</span> unless you answer.
+        <button class="btn" id="laterBtn" style="margin-left:8px">Hide</button></p>` });
+    wireAsk(box, (id, text) => post("question", { id, text }));
+    $("laterBtn").onclick = () => { hiddenUrgent = q.id; box.hidden = true; };
+  }
+  $("clock") && ($("clock").textContent = clock);
+}
+
+function cycle(s) {
+  const keys = s.stages.map(x => x.key);
+  const now = s.stage, at = keys.indexOf(now);
+  if (changed("stages", [now])) $("stages").innerHTML = s.stages.map((x, i) =>
+    `<li class="${x.key} ${x.key === now ? "now" : ""} ${at > 0 && i < at && x.key !== "talk" && now !== "talk" ? "past" : ""}">
+      <span class="n">${i + 1}</span><span><b>${esc(x.name)}</b><small>${esc(x.what)}</small></span></li>`).join("");
+  const st = s.status;
+  $("now").innerHTML = s.busy ? `${esc(s.busy)}${st.round !== undefined && s.busy === "building" ? `, round ${st.round}` : ""}`
+    + (st.active && st.active.length ? `<br>${st.active.map(a => `${esc(a.role)}: ${esc(a.label)} (${a.elapsed}s)`).join("<br>")}` : "")
+    : "Nothing running.";
 }
 
 function appPanel(s) {
@@ -315,17 +434,22 @@ async function loadModels() {
 }
 
 async function refresh() {
+  let s;
+  try { s = await (await fetch("api/state")).json(); }
+  catch (e) { $("where").textContent = "The studio server isn't running."; return; }
+  state = s;
   try {
-    const s = await (await fetch("api/state")).json();
-    state = s;
     $("where").textContent = s.project ? `${s.project.name} · ${s.project.path}` : "No project open";
-    chips(s); projectList(s); talk(s); buildPanel(s); questionList(s); appPanel(s);
-  } catch (e) {
-    $("where").textContent = e instanceof TypeError && String(e).includes("fetch") ? "The studio server isn't running." : "Display error: " + e;
-    console.error(e);
-  }
+    chips(s); projectList(s); talk(s); buildPanel(s); questionTab(s); appPanel(s); cycle(s); urgent(s);
+  } catch (e) { $("where").textContent = "Display error: " + e; console.error(e); }
 }
 refresh(); setInterval(refresh, 2000);
+setInterval(() => {  // the countdown ticks every second between refreshes
+  const w = state && state.waiting, c = $("clock");
+  if (!w || !c) return;
+  const left = Math.max(0, Math.round(w.until - Date.now() / 1000));
+  c.textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
+}, 1000);
 </script>
 </body>
 </html>

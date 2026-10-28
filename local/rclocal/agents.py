@@ -65,9 +65,9 @@ def _chat(system, user):
 
 QUESTION_RULES = (
     "Ask at most 3 questions, only about choices that change what gets built (what it does, who it's for, "
-    "what's left out, how it looks). Each question has 2 to 4 short options and a default: the option you "
-    "would pick, word for word. Never ask what the user already told you, and never ask about code, files "
-    "or technology."
+    "what's left out, how it looks). Each question has 2 to 4 options: a label of 2 or 3 words, and a detail "
+    "sentence on what picking it means. default is the label you would pick, word for word. Never ask what the "
+    "user already told you, and never ask about code, files or technology."
 )
 
 
@@ -187,7 +187,9 @@ async def plan(sched, stack, idea, conventions, contracts_md, answers, first):
             "one-way, never in a circle. Do not plan tests or UI files: each logic file gets tests automatically"
             + (", and a designer makes the page from your exports. " if stack.name == "web" else ". ")
             + "List at most 3 big choices a user would care about (what is left out, a rounding or default rule) "
-            "as guesses with the options you passed over; skip anything the brief or the answers already settle. "
+            "as guesses. Each guess has 2 to 4 options, including the one you picked: a label of 2 or 3 words and "
+            "a detail sentence on what it means; choice is the label you picked, word for word. Skip anything the "
+            "brief or the answers already settle. "
             "Add conventions only if the project needs more than the ones given. Set complete "
             "to true if these files cover the whole idea."
         )

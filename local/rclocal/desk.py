@@ -34,6 +34,17 @@ from .runner import Runner, free_port
 from .scheduler import Scheduler
 
 BUILD_WORDS = ("build", "build it", "go", "start", "start building")
+# The cycle, in order: (key, name, what happens). The studio lists these and lights up the current one.
+STAGES = [
+    ("talk", "Talk it through", "You and the brainstormer agree on a brief"),
+    ("plan", "Plan", "Files and the contracts between them"),
+    ("build", "Build files", "Tests first, then each file until its tests pass"),
+    ("page", "Design the page", "Built from the kit, checked in Chrome"),
+    ("verify", "Check everything", "Every file's tests, and one fix pass"),
+    ("try", "Test users", "Three people try the page"),
+    ("wrap", "Report", "What was built, and what needs you"),
+    ("you", "Your answers", "A file is stuck: answer, or it takes the suggestion"),
+]
 
 
 def client_for(hub):
@@ -150,7 +161,7 @@ class Desk:
         self.pending = [{"question": q, "answer": None} for q in reply["questions"]]
         self.ready = reply["ready"] or not reply["questions"]
         brief = reply["brief"]
-        lines = [f"**{brief['name']}**: {brief['pitch']}"] + [f"• {p}" for p in reply["pushback"]]
+        lines = [f"{brief['name']}: {brief['pitch']}"] + [f"• {p}" for p in reply["pushback"]]
         if self.ready and not self.pending:
             lines.append("The brief looks clear to me. Press Build when you're ready, or tell me more.")
         self.post("brainstormer", "\n".join(lines), questions=[i["question"] for i in self.pending])
@@ -274,6 +285,31 @@ class Desk:
         messages.append({"who": who, "text": text, "questions": questions or [], "ts": time.time()})
         self.hub._write_text(self.chat_path(), json.dumps(messages[-200:], indent=2) + "\n")
 
+    def waiting(self):
+        """The blocking questions a run is waiting on, with the deadline, or None."""
+        if not self.hub:
+            return None
+        events = self.hub.events.read(last=400)
+        last = next((e for e in reversed(events) if e["type"] in ("waiting", "waited")), None)
+        if not last or last["type"] == "waited" or not self.busy:
+            return None
+        questions = [self.hub.question(q) for q in last["questions"]]
+        return {"until": last["until"], "questions": [q for q in questions if q["status"] == "open"]}
+
+    def stage(self, snapshot=None):
+        """Which stage of the cycle is running now, or None when nothing is."""
+        if self.busy == "thinking it through":
+            return "talk"
+        if self.busy != "building" or not snapshot:
+            return None
+        if self.waiting():
+            return "you"
+        phase = snapshot.get("phase")
+        if phase == "build":
+            running = [t for t in snapshot.get("tasks", []) if t["status"] == "in_progress"]
+            return "page" if running and all(t["module"] == "index.html" for t in running) else "build"
+        return {"plan": "plan", "verify": "verify", "fix": "verify", "try": "try", "questions": "wrap"}.get(phase, "plan")
+
     def state(self):
         hub = self.hub
         return {
@@ -285,4 +321,6 @@ class Desk:
             "pending": [{"index": i, **item} for i, item in enumerate(self.pending)],
             "ready": self.ready,
             "app": self.app[0] if self.app else None,
+            "waiting": self.waiting(),
+            "stages": [{"key": k, "name": n, "what": w} for k, n, w in STAGES],
         }

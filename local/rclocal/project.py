@@ -46,7 +46,8 @@ def projects_dir():
     return Path(os.environ.get("ROUGHCUT_PROJECTS", Path.home() / "roughcut-projects"))
 
 
-FILLER = {"a", "an", "the", "for", "of", "to", "and", "with", "my", "that", "i", "want", "app", "simple", "small", "some"}
+FILLER = {"a", "an", "the", "for", "of", "to", "and", "with", "my", "that", "i", "want", "app", "simple", "small", "some",
+          "where", "which", "who", "when", "can", "lets", "let", "me", "you", "your", "it", "in", "on", "see", "so"}
 
 
 def slug(text, fallback="app"):

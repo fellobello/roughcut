@@ -122,7 +122,9 @@ def talk(hub, client, thoughts):
         for i, q in enumerate(reply["questions"], 1):
             print(f"\n{i}. {q['text']}" + (f"  ({q['why']})" if q["why"].strip() else ""))
             for letter, option in zip(LETTERS, q["options"]):
-                print(f"   {letter}) {option}{'   ← my pick' if option == q['default'] else ''}")
+                detail = q.get("details", {}).get(option, "")
+                print(f"   {letter}) {option}{'   ← my pick' if option == q['default'] else ''}"
+                      + (f"\n      {detail}" if detail else ""))
             print(f"   → {session.answer(q, ask('   > '))}")
         settled = reply["ready"] or not reply["questions"]  # nothing left to ask is as good as ready
         hint = "Enter starts building" if settled else "Enter keeps talking"
@@ -150,7 +152,8 @@ def walk_questions(hub):
         print(f"{q['id']}: {q['text']}" + (f"  ({q['why']})" if q["why"] else ""))
         options = list(dict.fromkeys(([q["choice"]] if q["choice"] else []) + q["options"]))[:4]
         for letter, option in zip(LETTERS, options):
-            print(f"   {letter}) {option}{'   ← picked' if option == q['choice'] else ''}")
+            detail = (q.get("details") or {}).get(option, "")
+            print(f"   {letter}) {option}{'   ← picked' if option == q['choice'] else ''}" + (f"\n      {detail}" if detail else ""))
         reply = ask("   > ").strip()
         if reply.lower() == "s":
             continue
@@ -174,14 +177,15 @@ def walk_questions(hub):
 # Rounds and the app
 
 
-def run_rounds(hub, client, rounds, ui=None, quiet=False):
+def run_rounds(hub, client, rounds, ui=None, quiet=False, wait=None):
     if ui:
         from .status import serve
 
         server = serve(hub, client, ui)
         threading.Thread(target=server.serve_forever, daemon=True).start()
         print(f"Status page: http://127.0.0.1:{ui}", flush=True)
-    summaries, why = rounds_mod.run_rounds(hub, client, rounds, echo=None if quiet else echo)
+    summaries, why = rounds_mod.run_rounds(hub, client, rounds, echo=None if quiet else echo,
+                                           wait=None if wait is None else wait * 60)
     for summary in summaries:
         print(json.dumps(summary, indent=2), flush=True)
     print(f"Stopped: {why}." + (" Answer with: roughcut-local questions --ask" if "questions" in why else ""), flush=True)
@@ -210,7 +214,7 @@ def serve_app(hub, port=None, open_browser=True):
 
 def finish(hub, client, args):
     """After talking: build, then show the app."""
-    result = run_rounds(hub, client, args.rounds, args.ui, args.quiet)
+    result = run_rounds(hub, client, args.rounds, args.ui, args.quiet, args.wait)
     project.render(hub)
     if not args.no_open:
         serve_app(hub)
@@ -357,6 +361,7 @@ def build_parser():
         p.add_argument("--ui", type=int, nargs="?", const=8765, help="also serve the status page (default port 8765)")
         p.add_argument("--no-open", action="store_true", help="don't open the app when it's built")
         p.add_argument("--quiet", action="store_true")
+        p.add_argument("--wait", type=float, help="minutes to wait for your answer when stuck, then take the suggestion (default 10; 0 stops)")
 
     p = sub.add_parser("new", help="start from an idea: talk it through, build it, open it")
     p.add_argument("idea", nargs="?")
@@ -401,6 +406,7 @@ def build_parser():
     p.add_argument("--rounds", type=int, default=1, help="run up to this many rounds in a row (default 1)")
     p.add_argument("--ui", type=int, nargs="?", const=8765, help="also serve the status page (default port 8765)")
     p.add_argument("--quiet", action="store_true")
+    p.add_argument("--wait", type=float, help="minutes to wait for your answer when stuck, then take the suggestion (default 10; 0 stops)")
 
     p = sub.add_parser("answer", help="answer a question, or change or confirm a guess")
     p.add_argument("id")
@@ -428,7 +434,7 @@ def main(argv=None):
         "init": cmd_init,
         "check": cmd_check,
         "talk": cmd_talk,
-        "round": lambda h, a: run_rounds(h, client_for(h), a.rounds, a.ui, a.quiet),
+        "round": lambda h, a: run_rounds(h, client_for(h), a.rounds, a.ui, a.quiet, a.wait),
         "answer": lambda h, a: h.answer(a.id, a.text, a.keep),
         "redo": lambda h, a: h.retry(a.id, a.reason),
         "questions": cmd_questions,
