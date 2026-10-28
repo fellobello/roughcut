@@ -1,6 +1,6 @@
 # Roughcut
 
-A Claude Code plugin that turns a software idea into a working sample, a round at a time.
+A Ollama plugin that turns a software idea into a working sample, a round at a time.
 
 You give it an idea in a sentence or two, the way you'd write it in a notebook. Agents plan it, build the modules in parallel, merge and test them, and then stop with a short list of questions. You answer, and the next round builds on your answers. You decide when it's done.
 
