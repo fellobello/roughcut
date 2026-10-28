@@ -140,7 +140,11 @@ h1 { letter-spacing: .02em; } h2, .msg .who, th { letter-spacing: .14em; }
 .opt { box-shadow: var(--bevel); } .opt.pick { box-shadow: var(--inset); }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 /* Talk: no panels behind the chat or the message box, so they sit right on the page. */
-#talk .card { background: none; box-shadow: none; padding: 0 4px; margin-bottom: 18px; }
+#talk .card { background: none; box-shadow: none; padding: 0 4px; margin-bottom: 0; }
+/* Talk fills the window: the chat scrolls in the middle, the message box stays at the bottom. */
+#talk.on { display: flex; flex-direction: column; gap: 14px; height: calc(100dvh - 150px); min-height: 360px; }
+#talk > .card:first-child { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+#talk .chat { flex: 1; max-height: none; }
 @media (max-width: 900px) {
   .layout, body.no-left .layout, body.no-right .layout { grid-template-columns: minmax(0, 1fr); }
   #left, main, #right { grid-column: 1; }
