@@ -23,18 +23,20 @@ import posixpath
 import re
 import subprocess
 
-from . import agents
+from . import agents, pages, project
 from .contracts import ContractError, file_id
 from .hub_local import HUB_OWNER, HubError
 from .llm import LLMError
 from .runner import Runner
 from .scheduler import Scheduler
 from .stacks import filter_styles
+from .users import TestUsers
 
 OPEN_FENCE = re.compile(r"^\s*```[a-zA-Z]*[ \t]*\n")
 CLOSE_FENCE = re.compile(r"\n?```\s*$")
 PAGE_IMPORT = re.compile(r"""import\s*\{([^}]*)\}\s*from\s*['"]\./(app/[^'"]+)['"]""")
-MAX_DECISIONS = 5  # per task; small models over-report
+MAX_DECISIONS = 2  # per task; small models over-report
+MAX_GUESSES = 3  # per plan, so the questions you get are few and real
 KEEP_TURNS = 8  # agent messages kept after the opening two, so its context stays small
 DESIGN_TASK = "page-design"
 VERIFY_PARALLEL = 3
@@ -50,6 +52,21 @@ def norm(path):
     """A path as the model wrote it, tidied: './app/x.js' -> 'app/x.js'. '..' parts stay, and fail the allow-list."""
     path = path.strip()
     return posixpath.normpath(path) if path else ""
+
+
+def tidy_path(path, stack):
+    """A planned path made to fit the layout without a model call: 'calculatePace.js' -> 'app/calculate_pace.js'."""
+    path = norm(path)
+    folder, _, name = path.rpartition("/")
+    stem, dot, ext = name.rpartition(".")
+    if not dot:
+        stem, ext = name, ""
+    stem = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", stem).replace("-", "_").lower()
+    ext = ext.lower() or stack.example.rsplit(".", 1)[1]
+    folder = folder.lower().replace("-", "_")
+    if not (folder == "app" or folder.startswith("app/")):
+        folder = "app" + ("/" + folder if folder and folder not in (".", "src", "lib") else "")
+    return f"{folder}/{stem}.{ext}"
 
 
 def cut_off_note(path):
@@ -81,6 +98,7 @@ class Round:
         self.runner = Runner(hub.project, self.stack, self.cfg["test_timeout"], self.cfg["sandbox"], self.events)
         self.requests = []  # (task id, contract request), applied between tasks
         self.number = None
+        self.page_checked = False  # a page passed its check this round, so the test users try it
 
     # The round
 
@@ -111,11 +129,17 @@ class Round:
             passed, failing, output = await self.verify()
             self.reopen(failing)  # left for the next round
 
+        inventory = (getattr(self.runner, "last_check", None) or {}).get("inventory")
+        if self.page_checked and inventory and self.cfg["test_users"]:
+            self.events.emit("phase", name="try")
+            await TestUsers(self).run(project.brief_text(hub), inventory)
+
         self.events.emit("phase", name="questions")
         notes = await self.report_notes(passed, output)
         hub.render()
         hub.contracts.render()
         report = hub.report(notes)
+        project.render(hub, notes)
         self.commit(f"Round {self.number} questions")
         status = hub.status()
         screen = hub.root / "screens" / f"round-{self.number}.png"
@@ -146,7 +170,13 @@ class Round:
         reply = await agents.plan(
             self.sched, self.stack, idea, hub.memory.conventions(), self.contracts_md(), answers, first
         )
-        self.apply_plan(reply)
+        skipped = self.apply_plan(reply)
+        if first and not hub.contracts.all():  # nothing usable: one more try, told why
+            why = "; ".join(skipped) or "the plan had no files"
+            self.events.emit("note", text=f"the plan had no usable files ({why}); asking again")
+            retry = [{"text": "Your last plan was rejected", "answer": f"{why}. Plan again."}]
+            reply = await agents.plan(self.sched, self.stack, idea, hub.memory.conventions(), "", answers + retry, first)
+            self.apply_plan(reply)
         return reply["complete"]
 
     def contracts_md(self):
@@ -155,15 +185,20 @@ class Round:
     def apply_plan(self, reply):
         hub, contracts = self.hub, self.hub.contracts
         hub.memory.set_conventions(reply["conventions"])
-        for guess in reply["guesses"]:
-            if guess["text"].strip():
-                self.decide(HUB_OWNER, guess, critical=True)
-        planned = []
+        asked = {q["text"] for q in hub.questions()}
+        for guess in [g for g in reply["guesses"] if g["text"].strip() and g["text"].strip() not in asked][:MAX_GUESSES]:
+            self.decide(HUB_OWNER, guess, critical=True)
+        planned, skipped = [], []
         for file_plan in reply["files"]:
+            tidy = {**file_plan, "path": tidy_path(file_plan["path"], self.stack),
+                    "imports": [tidy_path(p, self.stack) for p in file_plan["imports"] if p.strip()]}
+            if tidy["path"] != file_plan["path"]:
+                self.events.emit("note", text=f"renamed {file_plan['path']} to {tidy['path']} to fit the layout")
             try:
-                contract, what = contracts.upsert(file_plan, self.number, f"round {self.number} plan")
+                contract, what = contracts.upsert(tidy, self.number, f"round {self.number} plan")
             except (ContractError, ValueError) as e:
                 self.events.emit("note", text=f"skipped a planned file: {e}")
+                skipped.append(str(e))
                 continue
             planned.append((contract, what))
         known = {c["path"] for c in contracts.all()}
@@ -193,6 +228,7 @@ class Round:
         errors = hub.check()
         if errors:
             raise HubError("the plan's task graph is invalid: " + "; ".join(errors))
+        return skipped
 
     def ensure_tasks(self, contract, what):
         hub = self.hub
@@ -388,7 +424,9 @@ class Round:
         except LLMError as e:
             self.events.emit("note", text=f"no notes for {contract['path']}: {e}")
             return
-        self.record(task["id"], notes["decisions"])
+        if not failure:  # a failing file's "decisions" are its bugs, not choices you'd want to change
+            had = sum(1 for q in self.hub.questions() if q["task"] == task["id"])
+            self.record(task["id"], notes["decisions"][: max(0, MAX_DECISIONS - had)])
         self.requests.extend((task["id"], r) for r in notes["contract_requests"])
         if learned:
             self.hub.memory.add_lesson(notes["lesson"], contract["path"])
@@ -421,35 +459,114 @@ class Round:
     # Design (web stack)
 
     async def design(self, task, idea):
+        """Make the page, or change a working one. Every fix after the first draft rewrites one part only."""
         hub = self.hub
         for name, text in self.stack.scaffold(hub.project).items():
             if not (hub.project / name).exists():
                 hub._write_text(hub.project / name, text)  # projects made before the kit existed
         notes = list(task["notes"])
+        tries = self.cfg["design_tries"]
+        html, css = self.read_page()
+        if html and not self.page_problem(html):
+            why = "; ".join(n.removeprefix("retry: ") for n in notes[-3:]) or "make the page better"
+            picked = await agents.pick_page_part(self.sched, html, why)
+            if picked["part"] != "whole":
+                self.events.emit("page_fix", part=picked["part"], reason=f"{why} ({picked['why']})")
+                status, summary = await self.settle_page(html, css, notes, tries, part=picked["part"], why=why)
+                if status != "done":
+                    hub._write_text(hub.project / "index.html", html)  # put the working page back
+                    hub._write_text(hub.project / "styles.css", css)
+                return status, summary
+            self.events.emit("page_fix", part="whole", reason=f"{why} ({picked['why']})")
         problem = ""
-        for attempt in range(1, self.cfg["design_tries"] + 1):
+        for attempt in range(1, tries + 1):
             text, cut = await agents.design_page(self.sched, idea, self.contracts_md(), hub.memory.conventions(), notes)
             html = clean_code(text)
             problem = cut_off_note("index.html") if cut else self.page_problem(html)
-            if not problem:
-                text, cut = await agents.design_styles(self.sched, html, notes)
-                css, dropped = filter_styles(clean_code(text))
-                if dropped:
-                    self.events.emit("note", text=f"styles.css: dropped rules that restyled the kit: {', '.join(dropped[:8])}")
-                guarded = self.stack.guard(css)
-                problem = cut_off_note("styles.css") if cut else (
-                    f"styles.css was rejected by the safety guard: {'; '.join(guarded)}" if guarded else ""
-                )
-            if not problem:
-                hub._write_text(hub.project / "index.html", html)
-                hub._write_text(hub.project / "styles.css", css)
-                screen = hub.root / "screens" / f"round-{self.number}.png"
-                ok, problem = await self.runner.check_page(screenshot=screen)
-                if ok:
-                    return "done", "index.html and styles.css work in the browser" + (f" ({problem})" if problem else "")
-            self.events.emit("note", text=f"page attempt {attempt} rejected: {problem}")
-            notes.append(f"Attempt {attempt} was rejected: {problem}")
-        return "failed", f"no working page after {self.cfg['design_tries']} tries: {problem}"
+            if problem:
+                self.events.emit("note", text=f"page draft {attempt} rejected: {problem}")
+                notes.append(f"Draft {attempt} was rejected: {problem}")
+                continue
+            text, cut = await agents.design_styles(self.sched, html, notes)
+            css, problem = self.checked_styles(text, cut)
+            if problem:
+                self.events.emit("note", text=f"styles.css left empty: {problem}")  # the kit still styles the page
+                css = ""
+            return await self.settle_page(html, css, notes, tries - attempt)
+        return "failed", f"no working page after {tries} tries: {problem}"
+
+    async def settle_page(self, html, css, notes, fixes, part=None, why=""):
+        """Write the page and check it; after a failure, rewrite only the part the check flagged.
+
+        With `part`, that part is rewritten first, for `why`. Problems the check can name
+        exactly (hidden results, example numbers) are repaired without a model call.
+        """
+        hub = self.hub
+        screen = hub.root / "screens" / f"round-{self.number}.png"
+        problem = why
+        for attempt in range(fixes + 1):
+            if part:
+                html, css, bad = await self.fix_part(part, html, css, problem, notes)
+                if bad:
+                    problem = bad
+                    notes.append(f"Your {part} was rejected: {bad}")
+                    self.events.emit("note", text=f"page {part} fix rejected: {bad}")
+                    continue
+            self.write_page(html, css)
+            ok, problem = await self.runner.check_page(screenshot=screen)
+            check = getattr(self.runner, "last_check", None) or {}
+            if not ok:
+                repaired, what = pages.repair(html, check)
+                if what:
+                    self.events.emit("page_fix", part="markup", reason=f"repaired without a model: {what}")
+                    html = repaired
+                    self.write_page(html, css)
+                    ok, problem = await self.runner.check_page(screenshot=screen)
+                    check = getattr(self.runner, "last_check", None) or {}
+            if ok:
+                self.page_checked = True
+                fixed = f" after {attempt} fix{'es' if attempt != 1 else ''}" if attempt else ""
+                return "done", "index.html and styles.css work in the browser" + fixed + (f" ({problem})" if problem else "")
+            part = check.get("part") or "script"
+            notes.append(f"The page check failed: {problem}")
+            self.events.emit("note", text=f"page check failed: {problem}")
+            if attempt < fixes:
+                self.events.emit("page_fix", part=part, reason=problem)
+        return "failed", f"the page still fails its check: {problem}"
+
+    async def fix_part(self, part, html, css, problem, notes):
+        """Rewrite one part. Returns (html, css, problem): the page unchanged and a problem if the fix is unusable."""
+        if pages.get(part, html, css) is None:
+            return html, css, f"the page has no {part} in the expected shape"
+        text, cut = await agents.fix_page_part(self.sched, part, html, css, problem, self.contracts_md(), notes)
+        if part == "styles":
+            new_css, bad = self.checked_styles(text, cut)
+            return html, (css if bad else new_css), bad
+        if cut:
+            return html, css, cut_off_note(part)
+        candidate = pages.put(part, html, clean_code(text))
+        if candidate is None:
+            return html, css, f"write {agents.PART_WHAT[part]}"
+        bad = self.page_problem(candidate)
+        return (html, css, bad) if bad else (candidate, css, "")
+
+    def checked_styles(self, text, cut):
+        css, dropped = filter_styles(clean_code(text))
+        if dropped:
+            self.events.emit("note", text=f"styles.css: dropped rules that restyled the kit: {', '.join(dropped[:8])}")
+        if cut:
+            return css, cut_off_note("styles.css")
+        guarded = self.stack.guard(css)
+        return css, (f"styles.css was rejected by the safety guard: {'; '.join(guarded)}" if guarded else "")
+
+    def read_page(self):
+        project = self.hub.project
+        read = lambda name: (project / name).read_text(encoding="utf-8") if (project / name).exists() else ""
+        return read("index.html"), read("styles.css")
+
+    def write_page(self, html, css):
+        self.hub._write_text(self.hub.project / "index.html", html)
+        self.hub._write_text(self.hub.project / "styles.css", css)
 
     def page_problem(self, html):
         guarded = self.stack.guard(html)
@@ -562,9 +679,14 @@ class Round:
             return f"{done} of {len(tasks)} tasks are done. All tests {'pass' if passed else 'do not pass yet'}."
 
     def commit(self, message):
-        git = ["git", "-C", str(self.hub.project)]
-        subprocess.run(git + ["add", "-A"], capture_output=True)
-        result = subprocess.run(git + ["commit", "-q", "-m", message], capture_output=True, text=True)
-        if result.returncode != 0 and "user.email" in (result.stderr + result.stdout):
-            identity = ["-c", "user.name=roughcut-local", "-c", "user.email=roughcut-local@localhost"]
-            subprocess.run(git[:3] + identity + ["commit", "-q", "-m", message], capture_output=True)
+        commit(self.hub.project, message)
+
+
+def commit(folder, message):
+    """Commit everything in the project, so every step can be looked at and undone."""
+    git = ["git", "-C", str(folder)]
+    subprocess.run(git + ["add", "-A"], capture_output=True)
+    result = subprocess.run(git + ["commit", "-q", "-m", message], capture_output=True, text=True)
+    if result.returncode != 0 and "user.email" in (result.stderr + result.stdout):
+        identity = ["-c", "user.name=roughcut-local", "-c", "user.email=roughcut-local@localhost"]
+        subprocess.run(git[:3] + identity + ["commit", "-q", "-m", message], capture_output=True)

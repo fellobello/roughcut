@@ -49,12 +49,28 @@ PROBE_PAGE = ".probe.html"  # a throwaway copy of index.html with the probe adde
 PROBE_HEAD = """<script>window.__probeErrors = [];
 addEventListener('error', e => __probeErrors.push(String(e.message || e)));
 addEventListener('unhandledrejection', e => __probeErrors.push(String(e.reason)));</script>"""
+# Shared by the probe and the test-user script: how a control is named, and what the page shows.
+PAGE_HELPERS = """const sleep = ms => new Promise(r => setTimeout(r, ms));
+const report = r => { document.body.dataset.probe = JSON.stringify(r); };
+const squash = s => (s || '').replace(/\\s+/g, ' ').trim();
+const labelOf = el => squash((el.labels && el.labels[0] && el.labels[0].innerText) || el.getAttribute('aria-label')
+  || el.placeholder || (el.tagName === 'BUTTON' ? el.innerText : '') || el.name || el.id);
+const visible = el => !!el.offsetParent;
+const controls = () => [...document.querySelectorAll('input, select, textarea, button')]
+  .filter(e => visible(e) && e.type !== 'hidden')
+  .map(e => ({ id: e.id, kind: e.tagName === 'BUTTON' ? 'button' : e.tagName === 'SELECT' ? 'select' : (e.type || 'text'),
+               label: labelOf(e).slice(0, 60), value: e.type === 'checkbox' ? String(e.checked) : (e.value || '').slice(0, 30),
+               options: e.tagName === 'SELECT' ? [...e.options].map(o => squash(o.text)).slice(0, 12) : undefined,
+               pressed: e.getAttribute('aria-pressed') || undefined }));
+const results = () => [...document.querySelectorAll('.stat, .list li, output, .error')]
+  .filter(e => visible(e) && squash(e.innerText)).map(e => squash(e.innerText).slice(0, 80)).slice(0, 12);
+for (let i = 0; i < 40 && document.body.dataset.ready !== '1'; i++) await sleep(50);
+const main = document.querySelector('main') || document.body;"""
+
 # Runs after the app's module script (modules run in order).
 PROBE_TAIL = """<script type="module">
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-const report = r => { document.body.dataset.probe = JSON.stringify(r); };
-for (let i = 0; i < 40 && document.body.dataset.ready !== '1'; i++) await sleep(50);
-const main = document.querySelector('main') || document.body;
+""" + PAGE_HELPERS + """
+const inventory = { controls: controls(), results: results() };
 const before = main.innerText;
 const prefilled = [...document.querySelectorAll('.stat-value, .list li, output')]
   .filter(e => e.offsetParent && /[1-9]/.test(e.innerText)).map(e => e.innerText.trim()).slice(0, 3);
@@ -83,8 +99,60 @@ const stillHidden = [...document.querySelectorAll('[hidden]')]
   .map(name).slice(0, 4);
 report({ ready: document.body.dataset.ready === '1', errors: window.__probeErrors, filled, prefilled,
          changed: main.innerText !== before, error: errorEl ? errorEl.innerText.trim() : '', stillHidden, shown,
-         hasResults: !!document.querySelector('.stat-value, .list, output') });
+         hasResults: !!document.querySelector('.stat-value, .list, output'), inventory });
 </script>"""
+
+# A test user's steps, carried out one at a time. After each step it records what the
+# results show, any visible error, and whether the text the user expected is on the page.
+USER_TAIL = """<script type="module">
+""" + PAGE_HELPERS + """
+const steps = __STEPS__;
+const norm = s => squash(s).toLowerCase();
+const find = target => {
+  const t = norm(target).replace(/^#/, '');
+  const all = [...document.querySelectorAll('input, select, textarea, button')].filter(e => visible(e) && e.type !== 'hidden');
+  return all.find(e => norm(e.id) === t) || all.find(e => norm(labelOf(e)) === t)
+    || all.find(e => t && norm(labelOf(e)).includes(t)) || all.find(e => norm(labelOf(e)).length > 2 && t.includes(norm(labelOf(e))));
+};
+const log = [];
+const typed = [];
+for (const s of steps) {
+  if ((s.value ?? '') !== '' && !isNaN(Number(s.value))) typed.push(Number(s.value));
+  const entry = { do: s.do, target: s.target, value: s.value, expect: s.expect };
+  const el = find(s.target);
+  if (!el) { entry.result = 'there is no such control on the page'; log.push(entry); continue; }
+  const field = el.tagName !== 'BUTTON' && (s.value ?? '') !== '';  // a value on a field is typed, whatever the step says
+  if (el.tagName === 'BUTTON' || (s.do === 'click' && !field)) el.click();
+  else if (el.type === 'checkbox' || el.type === 'radio') {
+    const want = !/^(false|no|off|0|uncheck)/i.test(s.value || '');
+    if (el.checked !== want) el.click();
+  } else if (el.tagName === 'SELECT') {
+    const option = [...el.options].find(o => norm(o.text) === norm(s.value) || norm(o.value) === norm(s.value))
+      || [...el.options].find(o => norm(o.text).includes(norm(s.value)));
+    if (option) el.value = option.value; else entry.result = `no option "${s.value}"`;
+  } else el.value = s.value ?? '';
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+  await sleep(200);
+  entry.result = entry.result || 'done';
+  entry.shows = results();
+  if (s.expect) {
+    // Numbers are what matter: every number the user expected must be on the page, in any format.
+    const text = norm(main.innerText).replace(/,/g, '');
+    // Numbers the user typed in are in the fields, not the page text: expecting those checks nothing.
+    const nums = (s.expect.replace(/,/g, '').match(/\\d+(\\.\\d+)?/g) || []).filter(n => !typed.includes(Number(n)));
+    const missing = nums.filter(n => !new RegExp('(^|[^\\\\d.])' + n.replace('.', '\\\\.') + '(?![\\\\d])').test(text)
+      && !(n.includes('.') && text.includes(Number(n).toFixed(2))));
+    entry.saw_expected = nums.length ? missing.length === 0 : text.includes(norm(s.expect));
+    if (missing.length) entry.missing = missing;
+  }
+  log.push(entry);
+}
+report({ ready: document.body.dataset.ready === '1', errors: window.__probeErrors, log, controls: controls() });
+</script>"""
+
+# What the probe's first failure means for the page: which part a fix should rewrite.
+SCRIPT_PART, MARKUP_PART = "script", "markup"
 
 
 def _limits(cpu_seconds):
@@ -195,14 +263,48 @@ class Runner:
         data-ready="1", then fills each field in turn (its data-sample value, or a plain
         default), firing input/change after each, clicks the main button if there is one, and
         checks that the page changed and shows no .error. A page that only looks right fails.
+
+        After a call, self.last_check holds what the probe saw: which part of the page a fix
+        should rewrite ("script" or "markup"), what it reported, and the page's controls and
+        results before anything was typed (what the test users get to see).
         """
-        chrome = self.chrome()
-        if not chrome:
+        self.last_check = {"part": SCRIPT_PART, "probe": None, "inventory": None, "hidden": []}
+        if not self.chrome():
             return True, "no Chrome to check the page with; skipped"
-        index = self.project / "index.html"
+        html = (self.project / "index.html").read_text(encoding="utf-8")
+        try:
+            dom = await self._load(_with_tail(html, PROBE_TAIL), screenshot=screenshot)
+        except subprocess.TimeoutExpired:
+            return False, "the page didn't finish loading within 60s"
+        ok, problem, part, probe = _probe_verdict(dom)
+        self.last_check = {
+            "part": part, "probe": probe, "inventory": (probe or {}).get("inventory"),
+            "hidden": (probe or {}).get("stillHidden") or [],
+        }
+        return ok, problem
+
+    async def try_as_user(self, steps, viewport=(1280, 900), screenshot=None):
+        """Carry out a test user's steps in headless Chrome. Returns the probe report, or None if it didn't run."""
+        import json
+
+        if not self.chrome():
+            return None
+        html = (self.project / "index.html").read_text(encoding="utf-8")
+        tail = USER_TAIL.replace("__STEPS__", json.dumps(steps).replace("</", "<\\/"))
+        try:
+            dom = await self._load(_with_tail(html, tail), viewport=viewport, screenshot=screenshot, after=True)
+        except subprocess.TimeoutExpired:
+            return {"ready": False, "errors": ["the page didn't finish within 60s"], "log": [], "controls": []}
+        return _probe_report(dom)
+
+    async def _load(self, page_html, viewport=(1280, 900), screenshot=None, after=False):
+        """Serve the project, open page_html (a throwaway copy of index.html) and return its DOM.
+
+        The screenshot is of index.html as a visitor first sees it, or with after=True of the
+        copy, so it shows the page once the script in it has run.
+        """
         probe_page = self.project / PROBE_PAGE
-        html = index.read_text(encoding="utf-8")
-        probe_page.write_text(_with_probe(html), encoding="utf-8")
+        probe_page.write_text(page_html, encoding="utf-8")
         port = free_port()
         server = self.serve(port)
         try:
@@ -210,9 +312,9 @@ class Runner:
             base = f"http://127.0.0.1:{port}/"
             with tempfile.TemporaryDirectory(prefix="roughcut-chrome-") as profile:
                 args = [
-                    chrome, "--headless=new", "--disable-gpu", f"--user-data-dir={profile}", "--no-first-run",
-                    "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1", "--virtual-time-budget=6000",
-                    "--window-size=1280,900", "--hide-scrollbars",
+                    self.chrome(), "--headless=new", "--disable-gpu", f"--user-data-dir={profile}", "--no-first-run",
+                    "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1", "--virtual-time-budget=8000",
+                    f"--window-size={viewport[0]},{viewport[1]}", "--hide-scrollbars",
                 ]
                 dom = await asyncio.to_thread(
                     subprocess.run, args + ["--dump-dom", base + PROBE_PAGE], capture_output=True, text=True, timeout=60
@@ -220,59 +322,70 @@ class Runner:
                 if screenshot:
                     Path(screenshot).parent.mkdir(parents=True, exist_ok=True)
                     await asyncio.to_thread(
-                        subprocess.run, args + [f"--screenshot={screenshot}", base + "index.html"],
+                        subprocess.run, args + [f"--screenshot={screenshot}", base + (PROBE_PAGE if after else "index.html")],
                         capture_output=True, timeout=60,
                     )
-        except subprocess.TimeoutExpired:
-            return False, "the page didn't finish loading within 60s"
         finally:
             self.stop(server)
             probe_page.unlink(missing_ok=True)
-        return _probe_verdict(dom.stdout)
+        return dom.stdout
 
 
-def _with_probe(html):
+def _with_tail(html, tail):
     head = html.find("<head>")
     html = html[: head + 6] + PROBE_HEAD + html[head + 6:] if head != -1 else PROBE_HEAD + html
     end = html.rfind("</body>")
-    return html[:end] + PROBE_TAIL + html[end:] if end != -1 else html + PROBE_TAIL
+    return html[:end] + tail + html[end:] if end != -1 else html + tail
 
 
-def _probe_verdict(dom):
+def _with_probe(html):
+    return _with_tail(html, PROBE_TAIL)
+
+
+def _probe_report(dom):
     import html as html_lib
     import json
     import re
 
-    if not dom.strip():
-        return False, "the page didn't load at all"
-    found = re.search(r'data-probe="([^"]*)"', dom)
-    if not found:
+    found = re.search(r'data-probe="([^"]*)"', dom or "")
+    return json.loads(html_lib.unescape(found.group(1))) if found else None
+
+
+def _probe_verdict(dom):
+    """Return (ok, problem, part, report): part is the page part a fix should rewrite."""
+    if not (dom or "").strip():
+        return False, "the page didn't load at all", SCRIPT_PART, None
+    r = _probe_report(dom)
+    if r is None:
         if 'data-ready="1"' not in dom:
             return False, (
                 "the page script never finished (body has no data-ready=\"1\"): it threw an error, or imported "
                 "a name or file that doesn't exist"
-            )
-        return False, "the page check couldn't run its probe"
-    r = json.loads(html_lib.unescape(found.group(1)))
+            ), SCRIPT_PART, None
+        return False, "the page check couldn't run its probe", SCRIPT_PART, None
     filled = ", ".join(r["filled"]) or "no fields"
     if r["errors"]:
-        return False, f"after filling in {filled}, the page threw: {'; '.join(r['errors'][:3])}"
+        return False, f"after filling in {filled}, the page threw: {'; '.join(r['errors'][:3])}", SCRIPT_PART, r
     if not r["ready"]:
-        return False, 'the page script never set document.body.dataset.ready = "1"'
+        return False, 'the page script never set document.body.dataset.ready = "1"', SCRIPT_PART, r
     if r.get("prefilled"):
         return False, (
             f"before the user entered anything, the results already showed {', '.join(r['prefilled'])}: "
-            "don't put example numbers in the HTML; show the .empty state until the inputs are valid"
-        )
+            "don't put example numbers in the HTML or compute results before the user types; show \"—\" until the "
+            "inputs are valid"
+        ), MARKUP_PART, r
     if r["error"]:
-        return False, f"after filling in {filled} with sensible values, the page showed the error: {r['error']}"
+        return False, f"after filling in {filled} with sensible values, the page showed the error: {r['error']}", SCRIPT_PART, r
     if r.get("hasResults") and not r.get("shown"):
         hidden = r.get("stillHidden") or []
         why = f" These still have the hidden attribute: {', '.join(hidden)}; don't hide results." if hidden else ""
-        return False, f"after filling in {filled}, no result value with a number is visible.{why}"
+        return False, f"after filling in {filled}, no result value with a number is visible.{why}", (
+            MARKUP_PART if hidden else SCRIPT_PART), r
     if not r["changed"]:
         hidden = r.get("stillHidden") or []
         why = (f" These result elements still have the hidden attribute: {', '.join(hidden)}. Remove hidden from "
                "every element that contains the results, not only the inner ones.") if hidden else ""
-        return False, f"after filling in {filled}, nothing on the page changed: results must update as the user types.{why}"
-    return True, ""
+        return False, (
+            f"after filling in {filled}, nothing on the page changed: results must update as the user types.{why}"
+        ), SCRIPT_PART, r
+    return True, "", None, r

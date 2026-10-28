@@ -63,6 +63,118 @@ def _chat(system, user):
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
 
+QUESTION_RULES = (
+    "Ask at most 3 questions, only about choices that change what gets built (what it does, who it's for, "
+    "what's left out, how it looks). Each question has 2 to 4 short options and a default: the option you "
+    "would pick, word for word. Never ask what the user already told you, and never ask about code, files "
+    "or technology."
+)
+
+
+async def brainstorm(sched, stack, idea, project_notes, talk, turns_left):
+    """One brainstorm turn. talk is the conversation so far as text. Returns BRAINSTORM data."""
+    platform = "a web page that runs in the browser, with no server and no accounts" if stack.name == "web" else (
+        "a standard-library Python program"
+    )
+    system = (
+        "Brainstormer: You talk an app idea through with its owner before anything is built, like a good product "
+        f"partner. The app will be {platform}, built by small local models, so smaller and clearer is better. "
+        "Keep a brief of the app: a name, a one or two sentence pitch, must-haves (at most 5), nice-to-haves, "
+        "what is out of scope, and how it should look and feel. Push back where it helps: say in one sentence "
+        "each what you would cut, simplify or add, and why; agree when the idea is already good. Never repeat a "
+        "point you made earlier in the talk; if you have nothing new to say, leave pushback empty. "
+        f"{QUESTION_RULES} Set ready to true when the brief is clear enough to build the first version; "
+        f"you have {turns_left} turn(s) left, so on the last one set ready to true and ask nothing. {JSON_ONLY}"
+    )
+    user = _section("Idea", idea) + _section("What the project already is", project_notes) + _section("Talk so far", talk)
+    return await sched.ask("brainstormer", _chat(system, user), "brainstorm", reply="brainstorm")
+
+
+async def survey(sched, stack, path, code, other_paths):
+    """Describe one existing file as a contract. Returns FILE_PLAN data."""
+    system = (
+        f"Surveyor: {TEAM}\n"
+        "The project already exists. Read one of its files and write that file's contract: its purpose in one "
+        f"sentence, every export other files use or could use (each signature one exact line: {stack.export_hint}), "
+        "and the other project files it imports. Describe only what the code does now. "
+        f"{JSON_ONLY}"
+    )
+    user = _section("Path", path) + _section("Other files in the project", "\n".join(other_paths)) + _section("Code", code[:8000])
+    return await sched.ask("surveyor", _chat(system, user), f"survey:{path}", reply="survey")
+
+
+async def pick_page_part(sched, html, problem):
+    """Which one part of a working page to rewrite for a problem. Returns PAGE_PART data."""
+    system = (
+        "Designer: A page works but has a problem. Pick the one smallest part to rewrite: 'markup' (the HTML inside "
+        "<main>), 'script' (the <script type=\"module\">), 'styles' (styles.css), or 'whole' only if the change needs "
+        f"new inputs or results and new script together. Say why in one sentence. {JSON_ONLY}"
+    )
+    user = _section("Problem", problem) + _section("index.html", html)
+    return await sched.ask("designer", _chat(system, user), "design:pick-part", reply="page_part")
+
+
+PART_LANG = {"markup": "html", "script": "js", "styles": "css"}
+PART_WHAT = {
+    "markup": "the <main> element of index.html, from <main to </main>",
+    "script": "the code inside <script type=\"module\"> (without the script tags)",
+    "styles": "the whole of styles.css",
+}
+
+
+async def fix_page_part(sched, part, html, css, problem, contracts_md, notes):
+    """Rewrite one part of the page and nothing else. Returns (code, cut_off)."""
+    system = (
+        f"Designer: {TEAM}\n"
+        f"Fix a problem in the page by rewriting only {PART_WHAT[part]}. Everything else stays exactly as it is, "
+        "so keep every id and class the rest of the page uses. "
+        + ("The script imports only the exports listed in Contracts and its last line must be "
+           "document.body.dataset.ready = \"1\";\n" if part == "script" else "\n")
+        + f"{DESIGN_BRIEF}\n{SAFETY}\n{code_only(PART_LANG[part])}"
+    )
+    user = (
+        _section("Problem to fix", problem)
+        + _section("index.html now", html)
+        + (_section("styles.css now", css) if part == "styles" else "")
+        + _section("Contracts", contracts_md)
+        + _section("Notes", "\n".join(notes))
+    )
+    return await sched.ask("designer", _chat(system, user), f"design:fix-{part}")
+
+
+def _persona(persona):
+    return f"User: You are {persona['name']}, {persona['who']} You are trying a new app for the first time."
+
+
+async def user_plan(sched, persona, brief, controls):
+    """A test user's steps on the page's controls. Returns USER_PLAN data."""
+    system = (
+        f"{_persona(persona)} {persona['how']} You can only use the controls listed, by their id or label; if there is no "
+        "button, the results update by themselves as you type. Plan 3 to 8 steps: fill (type a value, or pick an option by its text) or click (a button). After each step, say in "
+        "expect the one number you'd look for on the page if the app works (like 34.50), worked out by hand, or a "
+        "word of the error message you'd expect; leave expect empty if you wouldn't check anything yet. "
+        f"{JSON_ONLY}"
+    )
+    user = _section("What the app is for", brief) + _section("What's on the screen", controls)
+    return await sched.ask("user", _chat(system, user), f"user:{persona['key']}:plan", reply="user_plan")
+
+
+async def user_verdict(sched, persona, brief, transcript, facts):
+    """What a test user thought of the app after trying it. Returns USER_VERDICT data."""
+    system = (
+        f"{_persona(persona)} Below is what happened when you tried it. Did it do what you wanted? List the problems "
+        "a real user would notice: a wrong result, NaN or blank results, nothing happening, a missing or confusing "
+        "error message, a confusing label. Write each problem as a sentence that says what went wrong (like: Each "
+        "person's share showed $138.00 for 4 people, but should be $34.50). Before you call a number wrong, work it "
+        "out again yourself; if your own "
+        "expectation was the mistake, it isn't a problem. where is 'logic' when a calculated result is wrong and "
+        "'page' for everything else. severity is 'high' only when the app fails at its main job. In wish, one thing "
+        f"you'd like it to do, or an empty string. {JSON_ONLY}"
+    )
+    user = _section("What the app is for", brief) + _section("What happened", transcript) + _section("Checked automatically", facts)
+    return await sched.ask("user", _chat(system, user), f"user:{persona['key']}:verdict", reply="user_verdict")
+
+
 async def plan(sched, stack, idea, conventions, contracts_md, answers, first):
     rules = (
         f"For each file give its path (like {stack.example}), its purpose, its exports and the other project "
@@ -74,8 +186,9 @@ async def plan(sched, stack, idea, conventions, contracts_md, answers, first):
             f"Plan the smallest working sample of the idea as 2 to 5 logic files in app/. {rules} Keep imports "
             "one-way, never in a circle. Do not plan tests or UI files: each logic file gets tests automatically"
             + (", and a designer makes the page from your exports. " if stack.name == "web" else ". ")
-            + "List the big choices you made (storage, data format, what is left out) as guesses with the options "
-            "you passed over. Add conventions only if the project needs more than the ones given. Set complete "
+            + "List at most 3 big choices a user would care about (what is left out, a rounding or default rule) "
+            "as guesses with the options you passed over; skip anything the brief or the answers already settle. "
+            "Add conventions only if the project needs more than the ones given. Set complete "
             "to true if these files cover the whole idea."
         )
     else:
@@ -149,8 +262,9 @@ async def write_owned_file(sched, stack, messages, path, label):
 async def file_notes(sched, brief, path, code, failure):
     system = (
         f"Notes: {TEAM}\n"
-        "You just wrote the file below. List at most three choices a user of the app would notice "
-        "(defaults, limits, formats) as decisions. If it needs something another file doesn't export, "
+        "You just wrote the file below. List at most two choices a user of the app would notice and might "
+        "want changed (a default, a limit, a rounding rule), as decisions. Leave out anything that only restates "
+        "the contract, and leave the list empty if there is nothing like that. If it needs something another file doesn't export, "
         "add a contract request naming that file's path and the exports to add; otherwise leave the list "
         f"empty. In lesson, put one line worth remembering for later files, or an empty string. {JSON_ONLY}"
     )

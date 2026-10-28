@@ -80,7 +80,14 @@ class OllamaClient:
         if think is not None:
             body["think"] = think
         start = time.monotonic()
-        resp = self._post("/api/chat", body)
+        try:
+            resp = self._post("/api/chat", body)
+        except LLMError as e:
+            if "repeat limit" not in str(e):
+                raise
+            # The model got stuck repeating itself and Ollama stopped it: once more, a little looser.
+            body["options"] = {**options, "temperature": max(0.6, options.get("temperature", 0)), "repeat_penalty": 1.15}
+            resp = self._post("/api/chat", body)
         stats.seconds += time.monotonic() - start
         stats.prompt_tokens += resp.get("prompt_eval_count", 0)
         stats.output_tokens += resp.get("eval_count", 0)

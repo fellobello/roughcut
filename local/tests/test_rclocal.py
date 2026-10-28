@@ -12,8 +12,12 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+_HOME = tempfile.TemporaryDirectory()  # the project list and projects folder, kept out of your real ones
+os.environ["ROUGHCUT_LOCAL_HOME"] = str(Path(_HOME.name) / "home")
+os.environ["ROUGHCUT_PROJECTS"] = str(Path(_HOME.name) / "projects")
 
-from rclocal import protocol  # noqa: E402
+from rclocal import pages, project, protocol  # noqa: E402
+from rclocal.brainstorm import Brainstorm  # noqa: E402
 from rclocal.contracts import ContractError, file_id  # noqa: E402
 from rclocal.events import Events  # noqa: E402
 from rclocal.hub_local import LocalHub  # noqa: E402
@@ -23,6 +27,7 @@ from rclocal.runner import Runner  # noqa: E402
 from rclocal.scheduler import Scheduler  # noqa: E402
 from rclocal.stacks import STACKS, js_guard, py_guard  # noqa: E402
 from rclocal.status import snapshot  # noqa: E402
+from rclocal.users import TestUsers, browser_facts  # noqa: E402
 
 PY, WEB = STACKS["python"], STACKS["web"]
 HAS_NODE = bool(shutil.which("node"))
@@ -185,9 +190,15 @@ class HubCase(unittest.TestCase):
 
 class ProtocolTest(unittest.TestCase):
     def test_every_role_replies_with_data_or_code(self):
-        data_roles = {"planner", "reviewer", "reporter"}
+        data_roles = {"brainstormer", "planner", "surveyor", "user", "reviewer", "reporter"}
         self.assertEqual(set(protocol.ROLES), data_roles | set(protocol.CODE_ROLES))
-        self.assertLessEqual(data_roles | {"step", "notes"}, set(protocol.REPLIES))
+        kinds = {"brainstorm", "planner", "survey", "step", "notes", "page_part", "user_plan", "user_verdict",
+                 "reviewer", "reporter"}
+        self.assertEqual(kinds, set(protocol.REPLIES))
+        self.assertTrue(all(protocol.ROLE_JOBS.values()))
+
+    def test_questions_always_carry_options_and_a_pick(self):
+        self.assertEqual(set(protocol.QUESTION["required"]), {"text", "options", "default", "why"})
 
     def test_steps_only_name_known_actions_and_carry_no_code(self):
         protocol.validate({"action": "read", "path": "app/a.py", "note": ""}, protocol.STEP)
@@ -387,6 +398,20 @@ class RoundTest(HubCase):
         self.assertTrue(summary["tests_passed"])
         self.assertEqual(set(self.statuses().values()), {"done"})
 
+    def test_planned_paths_are_tidied_to_fit_the_layout(self):
+        from rclocal.rounds import tidy_path
+
+        self.assertEqual(tidy_path("app/calculatePace.js", WEB), "app/calculate_pace.js")
+        self.assertEqual(tidy_path("src/unit-converter", WEB), "app/unit_converter.js")
+        self.assertEqual(tidy_path("Report.py", PY), "app/report.py")
+        self.assertIn("..", tidy_path("../x.py", PY))  # still refused by the contract check
+        camel = {**CONVERT, "path": "app/Convert.py"}
+        report = {**REPORT, "path": "report.py", "imports": ["app/Convert.py"]}
+        builds = {"app/convert.py": [CONVERT_GOOD], "app/report.py": [REPORT_GOOD]}
+        summary = self.run_round(Script(builds, PY_TESTS, plan_of([camel, report])))
+        self.assertTrue(summary["tests_passed"])
+        self.assertEqual(self.hub.contracts.get("app/report.py")["imports"], ["app/convert.py"])
+
     def test_contract_requests_extend_the_other_file(self):
         script = py_script({"app/convert.py": [CONVERT_GOOD], "app/report.py": [REPORT_GOOD]})
         rnd = Round(self.hub, FakeLLM(script))
@@ -436,6 +461,336 @@ class WebRoundTest(HubCase):
         self.assertIn("dataset.ready", rnd.page_problem(PAGE.replace('document.body.dataset.ready = "1";', "")))
         self.assertIn("kit.css", rnd.page_problem(PAGE.replace('<link rel="stylesheet" href="kit.css">', "")))
         self.assertIn("safety guard", rnd.page_problem(PAGE.replace("<main", '<script src="https://cdn.x/y.js"></script><main')))
+
+
+FIXED_SCRIPT = (
+    "import { tipFor } from './app/tip.js';\n"
+    "document.getElementById('out').textContent = tipFor(10, 10);\n"
+    'document.body.dataset.ready = "1";'
+)
+NEW_MAIN = '<main class="app"><h1>Bigger tips</h1><output id="out" class="big"></output></main>'
+
+
+def designer(part="markup"):
+    """A fake designer: drafts PAGE, and for a fix rewrites only the part it is asked for."""
+    calls = []
+
+    def respond(role, model, system, user, schema):
+        assert role == "designer", role
+        if schema is protocol.PAGE_PART:
+            calls.append("pick")
+            return {"part": part, "why": "only the layout changes"}
+        if "by rewriting only" in system:
+            fixing = "script" if "<script type=\"module\"> (without" in system else "markup" if "<main> element" in system else "styles"
+            calls.append(f"fix-{fixing}")
+            return {"script": "```js\n" + FIXED_SCRIPT + "\n```", "markup": "```html\n" + NEW_MAIN + "\n```"}.get(
+                fixing, "```css\n.big { font-size: 40px; }\n```")
+        if "Write index.html" in system:
+            calls.append("page")
+            return "```html\n" + PAGE + "\n```"
+        calls.append("styles")
+        return "```css\n" + CSS + "\n```"
+
+    return respond, calls
+
+
+class PagesTest(unittest.TestCase):
+    def test_parts_come_out_and_go_back_in(self):
+        self.assertIn("tipFor(50, 20)", pages.get("script", PAGE))
+        self.assertTrue(pages.get("markup", PAGE).startswith("<main"))
+        swapped = pages.put("script", PAGE, FIXED_SCRIPT)
+        self.assertIn("tipFor(10, 10)", swapped)
+        self.assertEqual(pages.get("markup", swapped), pages.get("markup", PAGE))
+        marked = pages.put("markup", PAGE, "Here it is:\n" + NEW_MAIN)
+        self.assertEqual(pages.get("markup", marked), NEW_MAIN)
+        self.assertEqual(pages.get("script", marked), pages.get("script", PAGE))
+        self.assertIsNone(pages.put("markup", PAGE, "<div>no main</div>"))
+
+    def test_hidden_results_and_example_numbers_are_repaired_without_a_model(self):
+        html = ('<main><div class="stats" hidden><div class="stat"><div class="stat-value">$36.00</div></div></div>'
+                '<p class="note" hidden>tip</p></main>')
+        fixed, what = pages.repair(html, {"hidden": ["div.stats"], "probe": {"prefilled": ["$36.00"]}})
+        self.assertNotIn('class="stats" hidden', fixed)
+        self.assertIn('<p class="note" hidden>', fixed)  # not a result: left alone
+        self.assertIn('<div class="stat-value">—</div>', fixed)
+        self.assertIn("hidden", what)
+        self.assertEqual(pages.repair(PAGE, {}), (PAGE, ""))
+
+
+@unittest.skipUnless(HAS_NODE, "needs node")
+class PageFixTest(HubCase):
+    stack = "web"
+
+    def design_round(self, respond, checks):
+        """A round with tip.js built and the page task started; check_page answers from `checks`."""
+        rnd = Round(self.hub, FakeLLM(respond))
+        rnd.number = 0
+        rnd.apply_plan(plan_of([TIP]))
+        (self.project / "app").mkdir(exist_ok=True)
+        (self.project / "app/tip.js").write_text(TIP_GOOD)
+        for task in self.hub.tasks():
+            if task["id"] != DESIGN_TASK:
+                self.hub.mark_done(task["id"], "given")
+
+        async def fake_check(screenshot=None):
+            ok, part = checks.pop(0)
+            rnd.runner.last_check = {"part": part, "probe": {}, "inventory": None, "hidden": []}
+            return ok, "" if ok else "the page threw: x is not defined"
+
+        rnd.runner.check_page = fake_check
+        return rnd, self.hub.start_tasks()[0]
+
+    def test_a_failed_check_rewrites_only_the_flagged_part(self):
+        respond, calls = designer()
+        rnd, task = self.design_round(respond, [(False, "script"), (True, None)])
+        status, summary = asyncio.run(rnd.design(task, "tips"))
+        self.assertEqual(status, "done", summary)
+        self.assertEqual(calls, ["page", "styles", "fix-script"])  # no second whole page
+        html = (self.project / "index.html").read_text()
+        self.assertIn("tipFor(10, 10)", html)
+        self.assertEqual(pages.get("markup", html), pages.get("markup", PAGE))
+        self.assertIn("after 1 fix", summary)
+
+    def test_a_change_to_a_working_page_keeps_the_rest(self):
+        (self.project / "index.html").write_text(PAGE)
+        (self.project / "styles.css").write_text(CSS)
+        respond, calls = designer(part="markup")
+        rnd, task = self.design_round(respond, [(True, None)])
+        self.hub.note(task["id"], "retry: make the result bigger")
+        task = self.hub.task(task["id"])
+        status, _ = asyncio.run(rnd.design(task, "tips"))
+        self.assertEqual(status, "done")
+        self.assertEqual(calls, ["pick", "fix-markup"])
+        html = (self.project / "index.html").read_text()
+        self.assertEqual(pages.get("markup", html), NEW_MAIN)
+        self.assertEqual(pages.get("script", html), pages.get("script", PAGE))
+        self.assertEqual((self.project / "styles.css").read_text(), CSS)
+
+    def test_a_change_that_never_works_puts_the_old_page_back(self):
+        (self.project / "index.html").write_text(PAGE)
+        (self.project / "styles.css").write_text(CSS)
+        respond, _ = designer(part="markup")
+        rnd, task = self.design_round(respond, [(False, "markup")] * 4)
+        status, _ = asyncio.run(rnd.design(task, "tips"))
+        self.assertEqual(status, "failed")
+        self.assertEqual((self.project / "index.html").read_text(), PAGE)
+
+
+@unittest.skipUnless(HAS_NODE, "needs node")
+class TestUsersTest(HubCase):
+    stack = "web"
+    INVENTORY = {"controls": [{"id": "bill", "kind": "number", "label": "Bill", "value": ""}], "results": ["Each —"]}
+
+    def respond(self, role, model, system, user, schema):
+        if schema is protocol.USER_PLAN:
+            return {"goal": "split a bill", "steps": [{"do": "fill", "target": "bill", "value": "50", "expect": "25"}]}
+        return {"works": False, "wish": "a share button",
+                "problems": [{"what": "each share is the whole bill", "severity": "high", "where": "logic"}]}
+
+    def users(self, plan=True):
+        rnd = Round(self.hub, FakeLLM(self.respond))
+        rnd.number = 0
+        if plan:
+            rnd.apply_plan(plan_of([TIP]))
+            for task in self.hub.tasks():
+                self.hub.mark_done(task["id"], "given")
+
+        async def fake_try(steps, viewport=(1280, 900), screenshot=None):
+            entry = {**steps[0], "result": "done", "shows": ["Each $NaN"], "saw_expected": False}
+            return {"ready": True, "errors": [], "log": [entry], "controls": []}
+
+        rnd.runner.try_as_user = fake_try
+        return TestUsers(rnd)
+
+    def test_test_users_send_the_page_back_and_ask_about_results(self):
+        results = asyncio.run(self.users().run("Split a bill", self.INVENTORY))
+        self.assertEqual([r["persona"] for r in results], ["Sam", "Riley", "Alex"])
+        self.assertTrue(all(not r["works"] for r in results))
+        self.assertEqual(self.hub.task(DESIGN_TASK)["status"], "todo")
+        self.assertTrue(any("NaN" in n for n in self.hub.task(DESIGN_TASK)["notes"]))
+        asked = [q for q in self.hub.questions() if "says a result is wrong" in q["text"]]
+        self.assertEqual(len(asked), 3)
+        report = (self.hub.root / "rounds/0.users.md").read_text()
+        self.assertIn("seen by the browser", report)
+        self.assertIn("a share button", report)
+
+    def test_the_page_is_sent_back_only_so_many_times(self):
+        self.hub._write(self.hub.root / "local.json", {**self.hub.local_config(), "user_fixes": 1})
+        asyncio.run(self.users().run("Split a bill", self.INVENTORY))
+        asyncio.run(self.users(plan=False).run("Split a bill", self.INVENTORY))
+        notes = [n for n in self.hub.task(DESIGN_TASK)["notes"] if "test users found" in n]
+        self.assertEqual(len(notes), 1)
+        self.assertEqual(len([q for q in self.hub.questions() if "says a result is wrong" in q["text"]]), 3)  # not asked twice
+
+    def test_browser_facts_need_no_model(self):
+        facts = browser_facts({"ready": True, "errors": ["boom"], "log": [
+            {"do": "fill", "target": "tip", "result": "there is no such control on the page"},
+            {"do": "fill", "target": "bill", "result": "done", "shows": ["Total undefined"]},
+        ]})
+        self.assertEqual(len(facts), 3)
+
+
+BRAINSTORM_REPLY = {
+    "brief": {"name": "Book Club Picker", "pitch": "Pick the next book fairly.", "must_have": ["add books", "vote"],
+              "nice_to_have": ["history"], "out_of_scope": ["accounts"], "look": "warm and calm"},
+    "pushback": ["I'd leave out accounts: everyone uses one shared screen."],
+    "questions": [
+        {"text": "How do people vote?", "options": ["one vote each", "rank them"], "default": "one vote each", "why": ""},
+        {"text": "Keep a history?", "options": ["yes", "no"], "default": "no", "why": "smaller"},
+    ],
+    "ready": True,
+}
+
+
+class BrainstormTest(HubCase):
+    stack = "web"
+
+    def test_a_turn_saves_the_brief_and_your_answers(self):
+        session = Brainstorm(self.hub)
+        session.start("something for my book club")
+        sched = Scheduler(FakeLLM(lambda *a: BRAINSTORM_REPLY), self.hub.local_config(), self.hub.events)
+        reply = asyncio.run(session.turn(sched, "something for my book club", 3))
+        self.assertEqual(session.answer(reply["questions"][0], ""), "one vote each")  # Enter takes the pick
+        self.assertEqual(session.answer(reply["questions"][1], "a"), "yes")
+        self.assertEqual(project.load_brief(self.hub)["name"], "Book Club Picker")
+        answered = {q["text"]: q["answer"] for q in self.hub.answered_since(0)}
+        self.assertEqual(answered, {"How do people vote?": "one vote each", "Keep a history?": "yes"})
+        idea = (self.hub.root / "idea.md").read_text()
+        project.set_idea_from_brief(self.hub, idea)
+        project.set_idea_from_brief(self.hub, (self.hub.root / "idea.md").read_text())
+        idea = (self.hub.root / "idea.md").read_text()
+        self.assertEqual(idea.count("Agreed in the brainstorm"), 1)
+        self.assertIn("vote", idea)
+        self.assertEqual(len(Brainstorm(self.hub).talk), 4)  # kept for next time
+
+    def test_project_notes_hold_the_brief_files_and_decisions(self):
+        project.save_brief(self.hub, BRAINSTORM_REPLY["brief"])
+        rnd = Round(self.hub, FakeLLM(None))
+        rnd.number = 0
+        rnd.apply_plan(plan_of([TIP]))
+        q = self.hub.ask("hub", "Keep a history?", critical=True, choice="no")
+        self.hub.answer(q["id"], "yes")
+        text = project.render(self.hub).read_text()
+        for part in ("# Book Club Picker", "**Must have:**", "`app/tip.js`: Work out tips", "Keep a history? → **yes**",
+                     "## Conventions", "## How to run it"):
+            self.assertIn(part, text)
+        self.assertEqual(project.find("Book Club Picker"), self.hub.project)
+        self.assertEqual(project.find(str(self.project)), self.hub.project)
+
+
+class BringInTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.folder = Path(self._tmp.name) / "tips"
+        (self.folder / "app").mkdir(parents=True)
+        (self.folder / "app/tip.js").write_text(TIP_GOOD)
+        (self.folder / "scripts").mkdir()
+        (self.folder / "scripts/deploy.py").write_text("print('hi')\n")
+        (self.folder / "package.json").write_text('{"name": "tips", "type": "module"}\n')
+        (self.folder / "README.md").write_text("# Tips\n\nA tip calculator for the whole table.\n")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_a_copy_is_surveyed_into_contracts(self):
+        copy = project.copy_folder(self.folder)
+        self.assertNotEqual(copy, self.folder)
+        self.assertEqual(project.guess_stack(copy), "web")
+        hub = LocalHub(copy)
+        hub.init(project.first_words(copy), {"stack": "web", "sandbox": False})
+        self.assertIn("tip calculator", (hub.root / "idea.md").read_text())
+        self.assertEqual((copy / "package.json").read_text(), '{"name": "tips", "type": "module"}\n')  # kept
+        plan = {"path": "tip.js", "purpose": "Tips", "exports": TIP["exports"], "imports": ["app/nowhere.js"]}
+        sched = Scheduler(FakeLLM(lambda *a: plan), hub.local_config(), hub.events)
+        found = asyncio.run(project.survey(hub, sched, hub.events))
+        self.assertEqual(found["surveyed"], ["app/tip.js"])
+        self.assertEqual(hub.contracts.get("app/tip.js")["imports"], [])
+        self.assertEqual(hub.task("app-tip-js")["status"], "done")
+        self.assertEqual(hub.task("app-tip-js-tests")["status"], "todo")
+        self.assertIn("scripts/deploy.py", (hub.root / "reference.md").read_text())
+        self.assertFalse((self.folder / ".hub").exists())  # the original is untouched
+
+    def test_github_urls(self):
+        self.assertTrue(project.is_github("https://github.com/fellobello/roughcut"))
+        self.assertTrue(project.is_github("https://github.com/a/b.git"))
+        self.assertFalse(project.is_github("https://example.com/a/b"))
+        self.assertFalse(project.is_github("https://github.com/a/b; rm -rf ~"))
+
+
+@unittest.skipUnless(HAS_NODE, "needs node")
+class TrialTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def trial(self, role, respond):
+        from rclocal import trial
+
+        t = trial.Trial(Path(tempfile.mkdtemp(dir=self._tmp.name)) / role, role, "fake:1b")
+        t.client = FakeLLM(respond)
+        return t, asyncio.run(t.run())
+
+    def test_a_tester_is_scored_on_catching_the_planted_bug(self):
+        from rclocal.trial import TESTS
+
+        _, (checks, _) = self.trial("tester", lambda *a: "```js\n" + TESTS + "```")
+        self.assertEqual(checks, {"writes a usable test file": True, "passes on correct code": True,
+                                  "catches the planted bug": True})
+        weak = TESTS.split("test('perPerson splits")[0]  # never tests the share, so misses the bug
+        _, (checks, _) = self.trial("tester", lambda *a: "```js\n" + weak + "```")
+        self.assertFalse(checks["catches the planted bug"])
+
+    def test_a_brainstormer_is_scored_on_its_questions(self):
+        _, (checks, detail) = self.trial("brainstormer", lambda *a: BRAINSTORM_REPLY)
+        self.assertTrue(all(checks.values()), checks)
+        self.assertIn("How do people vote?", detail)
+
+
+CHROME = Runner(Path("."), WEB).chrome()
+
+
+@unittest.skipUnless(HAS_NODE and CHROME, "needs node and Chrome")
+class BrowserTest(unittest.TestCase):
+    """The probe and the test-user script in a real headless Chrome."""
+
+    PAGE = (
+        '<!doctype html><html><head></head><body><main><label for="bill">Bill</label>'
+        '<input id="bill" type="number" data-sample="50"><output id="out"></output></main>'
+        '<script type="module">import { tipFor } from "./app/tip.js";\n'
+        'const b = document.getElementById("bill");\n'
+        'b.addEventListener("input", () => { document.getElementById("out").textContent = tipFor(Number(b.value), 20); });\n'
+        'document.body.dataset.ready = "1";</script></body></html>'
+    )
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self._tmp.name).resolve()
+        (self.project / "app").mkdir()
+        (self.project / "app/tip.js").write_text(TIP_GOOD)
+        (self.project / "package.json").write_text('{"type": "module"}\n')
+        (self.project / "index.html").write_text(self.PAGE)
+        self.runner = Runner(self.project, WEB)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_the_probe_lists_the_controls(self):
+        ok, problem = asyncio.run(self.runner.check_page())
+        self.assertTrue(ok, problem)
+        controls = self.runner.last_check["inventory"]["controls"]
+        self.assertEqual([(c["id"], c["label"]) for c in controls], [("bill", "Bill")])
+
+    def test_a_test_user_s_steps_really_happen(self):
+        steps = [{"do": "fill", "target": "Bill", "value": "50", "expect": "10"},
+                 {"do": "click", "target": "Share", "value": "", "expect": ""}]
+        report = asyncio.run(self.runner.try_as_user(steps))
+        first, second = report["log"]
+        self.assertEqual(first["shows"], ["10"])
+        self.assertTrue(first["saw_expected"])
+        self.assertIn("no such control", second["result"])
+        self.assertFalse((self.project / ".probe.html").exists())
 
 
 class SchedulerTest(unittest.TestCase):

@@ -77,6 +77,46 @@ BLAMES = ("code", "test", "contract")
 REVIEW = _obj(["blame", "reason"], blame={"type": "string", "enum": list(BLAMES)}, reason=STR)
 REPORT = _obj(["notes"], notes=STR)
 
+
+def _enum(*values):
+    return {"type": "string", "enum": list(values)}
+
+
+# A question for the user: always with options and the one the asker would pick, so
+# pressing Enter is a real answer.
+QUESTION = _obj(["text", "options", "default", "why"], text=STR, options=_list(STR), default=STR, why=STR)
+# What the app is, agreed with the user before building. Kept in .hub/brief.json and PROJECT.md.
+BRIEF = _obj(
+    ["name", "pitch", "must_have", "nice_to_have", "out_of_scope", "look"],
+    name=STR,
+    pitch=STR,  # one or two sentences
+    must_have=_list(STR),
+    nice_to_have=_list(STR),
+    out_of_scope=_list(STR),
+    look=STR,  # how it should look and feel
+)
+# One brainstorm turn: the brief so far, where the brainstormer pushes back, and up to 3 questions.
+BRAINSTORM = _obj(
+    ["brief", "pushback", "questions", "ready"],
+    brief=BRIEF,
+    pushback=_list(STR),  # "I'd leave out X: ..." or "Y is harder than it sounds: ..."
+    questions=_list(QUESTION),
+    ready=BOOL,  # true when the brief is clear enough to start building
+)
+# Which part of a working page a fix should rewrite; everything else is kept as it is.
+PAGE_PARTS = ("markup", "script", "styles", "whole")
+PAGE_PART = _obj(["part", "why"], part=_enum(*PAGE_PARTS), why=STR)
+# A test user's plan: steps on the page's real controls, each with what they expect to see after.
+USER_STEPS = ("fill", "click")
+USER_PLAN = _obj(
+    ["goal", "steps"],
+    goal=STR,
+    steps=_list(_obj(["do", "target", "value", "expect"], do=_enum(*USER_STEPS), target=STR, value=STR, expect=STR)),
+)
+# What a test user thought after trying the app. where: "page" (the screen) or "logic" (a wrong result).
+USER_PROBLEM = _obj(["what", "severity", "where"], what=STR, severity=_enum("high", "low"), where=_enum("page", "logic"))
+USER_VERDICT = _obj(["works", "problems", "wish"], works=BOOL, problems=_list(USER_PROBLEM), wish=STR)
+
 # One step of a builder agent: which action to take next. Code never goes in a step:
 # "write" makes the round ask for the file in a separate code reply.
 ACTIONS = {
@@ -93,11 +133,35 @@ STEP = _obj(
     note=STR,
 )
 
-# Data replies by call kind. "notes" runs on the builder's model.
-REPLIES = {"planner": PLAN, "step": STEP, "notes": NOTES, "reviewer": REVIEW, "reporter": REPORT}
+# Data replies by call kind. "notes" runs on the builder's model, "page_part" on the
+# designer's, "user_plan" and "user_verdict" on the test users', "survey" on the surveyor's.
+REPLIES = {
+    "brainstorm": BRAINSTORM,
+    "planner": PLAN,
+    "survey": FILE_PLAN,
+    "step": STEP,
+    "notes": NOTES,
+    "page_part": PAGE_PART,
+    "user_plan": USER_PLAN,
+    "user_verdict": USER_VERDICT,
+    "reviewer": REVIEW,
+    "reporter": REPORT,
+}
 CODE_ROLES = ("tester", "builder", "designer")
 CODE_STOP = "\n```"  # the closing fence of a code reply
-ROLES = ("planner", "tester", "builder", "designer", "reviewer", "reporter")  # each picks a model in local.json
+# Every role, with its one job. Each picks a model in local.json.
+ROLE_JOBS = {
+    "brainstormer": "talks the idea through with you before anything is built: pushes back, asks up to 3 questions a turn",
+    "planner": "turns the brief into files and their contracts",
+    "surveyor": "reads an existing project's files and writes a contract for each",
+    "tester": "writes one file's tests from its contract alone, never seeing the code",
+    "builder": "owns one file and works in steps until its tests pass",
+    "designer": "makes the page from the kit, and later fixes only the part of it that's wrong",
+    "user": "a test user who tries the finished page and says what's wrong, knowing nothing of the code",
+    "reviewer": "decides whether the code, the test or the contract is wrong when a file keeps failing",
+    "reporter": "writes the round summary",
+}
+ROLES = tuple(ROLE_JOBS)
 
 # Events: type -> fields every event of that type carries. Every event also has "ts" and "round".
 EVENTS = {
@@ -117,6 +181,8 @@ EVENTS = {
     "contract": ("path", "version", "reason"),
     "question": ("id", "text", "blocking"),
     "note": ("text",),
+    "page_fix": ("part", "reason"),
+    "user_test": ("persona", "works", "problems"),
 }
 
 

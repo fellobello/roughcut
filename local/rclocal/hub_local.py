@@ -30,24 +30,31 @@ DEFAULT_CONFIG = {
     "stack": "web",  # web: a browser app with a designed page; python: standard-library Python
     "host": "http://127.0.0.1:11434",
     "models": {
+        "brainstormer": "qwen3:8b",
         "planner": "qwen3:8b",
+        "surveyor": "qwen2.5-coder:7b",
         "tester": "qwen2.5-coder:7b",
         "builder": "qwen2.5-coder:7b",
         "designer": "qwen2.5-coder:7b",
+        "user": "qwen3:8b",
         "reviewer": "qwen3:8b",
         "reporter": "qwen3:8b",
     },
-    "think": {"planner": False, "reviewer": False, "reporter": False},
+    "think": {"brainstormer": False, "planner": False, "user": False, "reviewer": False, "reporter": False},
     "max_parallel_calls": 2,  # model calls in flight at once, across all models
     "model_slots": {},  # per-model limit, e.g. {"qwen3:8b": 1}; default 1 each
     "max_parallel_tasks": 3,  # tasks per wave
     "agent_steps": 10,  # actions a builder agent may take per attempt
     "design_tries": 3,  # page attempts before the design task gives up
+    "test_users": 3,  # test users who try each new page (0 turns them off)
+    "user_fixes": 2,  # times test users may send the page back, across all rounds
+    "brainstorm_turns": 4,  # most back-and-forth turns before building starts
     # Longest reply per call kind, in tokens. A model that loses track stops here instead of
     # writing until the call times out.
     "max_tokens": {
-        "planner": 3000, "tester": 2500, "builder": 3500, "designer": 4000,
-        "step": 300, "notes": 800, "reviewer": 600, "reporter": 600,
+        "brainstorm": 1500, "planner": 3000, "survey": 1200, "tester": 2500, "builder": 3500, "designer": 4000,
+        "step": 300, "notes": 800, "page_part": 200, "user_plan": 900, "user_verdict": 700,
+        "reviewer": 600, "reporter": 600,
     },
     "call_timeout": 900,  # seconds per model call
     "num_ctx": 8192,
@@ -80,7 +87,8 @@ class LocalHub(Hub):
         self.contracts.dir.mkdir(parents=True, exist_ok=True)
         self.memory.init()
         for name, text in stack.scaffold(self.project).items():
-            self._write_text(self.project / name, text)
+            if not (self.project / name).exists():  # a project brought in keeps its own package.json
+                self._write_text(self.project / name, text)
         self._ignore(".hub/events.jsonl", "__pycache__/", "node_modules/", ".probe.html")
         return {**result, "stack": stack.name}
 
@@ -145,6 +153,13 @@ class LocalHub(Hub):
             task["depends_on"] = sorted(set(depends_on))
             self._save_task(task)
             return task
+
+    def mark_done(self, task_id, summary):
+        """Mark a task done without running it: its file already exists (a project brought in)."""
+        with self.locked():
+            task = self.task(task_id)
+            task.update(status="done", summary=summary)
+            self._save_task(task)
 
     def note(self, task_id, text):
         with self.locked():
