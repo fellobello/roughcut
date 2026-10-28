@@ -59,15 +59,26 @@ class Contracts:
                 return contract
         raise ContractError(f"no contract for task {task_id}")
 
-    def upsert(self, plan, round_no, reason):
-        """Add a file's contract, or change it. Returns (contract, what) with what in new/changed/same."""
-        validate(plan, FILE_PLAN, "file plan")
-        path = self.check_path(plan["path"])
-        fields = {
+    @staticmethod
+    def _fields(plan, path):
+        return {
             "purpose": plan["purpose"].strip(),
             "exports": sorted(plan["exports"], key=lambda e: e["name"]),
             "imports": sorted(set(plan["imports"]) - {path}),
         }
+
+    def would_change(self, plan):
+        """Whether upserting this plan would change a contract that exists."""
+        if not self.exists(plan["path"]):
+            return False
+        contract = self.get(plan["path"])
+        return any(contract[k] != v for k, v in self._fields(plan, plan["path"]).items())
+
+    def upsert(self, plan, round_no, reason):
+        """Add a file's contract, or change it. Returns (contract, what) with what in new/changed/same."""
+        validate(plan, FILE_PLAN, "file plan")
+        path = self.check_path(plan["path"])
+        fields = self._fields(plan, path)
         with self.hub.locked():
             if not self.exists(path):
                 contract = {
@@ -99,6 +110,24 @@ class Contracts:
             contract["exports"] = sorted(contract["exports"] + added, key=lambda e: e["name"])
             self._bump(contract, round_no, reason)
             return contract, [e["name"] for e in added]
+
+    def set_example(self, path, name, call, returns, new_returns, round_no, reason):
+        """Correct one example (new_returns), or drop it (None). Returns the contract, or None if it isn't there."""
+        with self.hub.locked():
+            if not self.exists(path):
+                return None
+            contract = self.get(path)
+            for export in contract["exports"]:
+                examples = export.get("examples", [])
+                for i, example in enumerate(examples):
+                    if export["name"] == name and example["call"] == call and example["returns"] == returns:
+                        if new_returns is None:
+                            del examples[i]
+                        else:
+                            examples[i] = {**example, "returns": new_returns}
+                        self._bump(contract, round_no, reason)
+                        return contract
+            return None
 
     def remove(self, path):
         """Forget a contract (a piece of a split that didn't come together)."""
@@ -168,7 +197,9 @@ class Contracts:
         parts = [self.describe(contract)]
         for imp in contract["imports"]:
             if self.exists(imp):
-                parts.append("It may use:\n" + self.describe(self.get(imp)))
+                how = self.stack.import_from(path, imp)
+                where = f" ({path} imports it from '{how}')" if how else ""
+                parts.append(f"It may use{where}:\n" + self.describe(self.get(imp)))
         return "\n\n".join(parts)
 
     def render(self):

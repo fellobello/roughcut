@@ -24,10 +24,10 @@ from rclocal.events import Events  # noqa: E402
 from rclocal.hub_local import LocalHub  # noqa: E402
 from rclocal.llm import FakeLLM, OllamaClient  # noqa: E402
 from hub import HubError  # noqa: E402
-from rclocal.rounds import DESIGN_TASK, Round, check_code, clean_code  # noqa: E402
+from rclocal.rounds import DESIGN_TASK, Round, check_code, clean_code, run_rounds  # noqa: E402
 from rclocal.runner import Runner  # noqa: E402
 from rclocal.scheduler import Scheduler  # noqa: E402
-from rclocal.stacks import STACKS, js_guard, py_guard  # noqa: E402
+from rclocal.stacks import PLACEHOLDER, STACKS, js_guard, py_guard  # noqa: E402
 from rclocal.status import snapshot  # noqa: E402
 from rclocal.users import TestUsers, browser_facts  # noqa: E402
 
@@ -287,6 +287,11 @@ class ContractsTest(HubCase):
         self.assertIn("to_celsius", c.brief("app/report.py"))
         self.assertNotIn("describe", c.brief("app/convert.py"))
 
+    def test_a_web_brief_says_how_the_file_itself_imports_each_one(self):
+        self.assertEqual(WEB.import_from("app/bill_parts/split_bill.js", "app/bill_parts/math.js"), "./math.js")
+        self.assertEqual(WEB.import_from("app/bill_parts/split_bill.js", "app/round.js"), "../round.js")
+        self.assertIsNone(PY.import_from("app/report.py", "app/convert.py"))
+
 
 class CodeChecksTest(unittest.TestCase):
     def test_fences_are_removed(self):
@@ -396,6 +401,26 @@ class RoundTest(HubCase):
         self.assertEqual((guess["status"], guess["choice"]), ("decided", I_GOT_IT))
         self.assertEqual(self.statuses()["app-report-py"], "todo")  # only what needs it waits
 
+    def test_stop_cuts_a_round_off_and_puts_its_files_back(self):
+        script = py_script({"app/convert.py": [CONVERT_GOOD], "app/report.py": [REPORT_GOOD]})
+        stop = []
+
+        def respond(role, *rest):
+            if role == "builder":
+                stop.append(True)  # you press Stop while the first builder is writing
+            return script(role, *rest)
+
+        summaries, why = run_rounds(self.hub, FakeLLM(respond), 3, cancel=lambda: bool(stop))
+        self.assertEqual((summaries, why), ([], "you stopped it partway through a round"))
+        self.assertNotIn("in_progress", self.statuses().values())
+        self.assertEqual(self.hub.config()["round"], 0)  # the round runs again next time
+
+    def test_a_run_ends_when_all_that_is_left_waits_on_a_stuck_file(self):
+        script = py_script({"app/convert.py": [CONVERT_BAD], "app/report.py": [REPORT_GOOD]})
+        summaries, why = run_rounds(self.hub, FakeLLM(script), 4)
+        self.assertEqual(len(summaries), 1)
+        self.assertIn("waits on app/convert.py", why)
+
     def test_a_file_you_finish_is_picked_up(self):
         script = py_script({"app/convert.py": [CONVERT_BAD], "app/report.py": [REPORT_GOOD]})
         self.run_round(script)
@@ -405,6 +430,35 @@ class RoundTest(HubCase):
         self.assertIn("finished by you", self.hub.task("app-convert-py")["summary"])
         self.assertTrue(summary["tests_passed"])
         self.assertEqual(set(self.statuses().values()), {"done"})
+
+    def test_it_works_counts_a_stuck_file_as_done(self):
+        script = py_script({"app/convert.py": [CONVERT_BAD], "app/report.py": [REPORT_GOOD]})
+        self.run_round(script)
+        guess = next(q for q in self.hub.questions() if q["task"] == "app-convert-py")
+        self.assertIn("It works", guess["options"])
+        self.hub.answer(guess["id"], "It works")
+        script.plan = {**script.plan, "files": [], "guesses": []}
+        self.run_round(script)
+        self.assertEqual(self.statuses()["app-convert-py"], "done")
+        self.assertTrue(self.hub.task("app-convert-py")["accepted"])
+        self.assertNotEqual(self.statuses()["app-report-py"], "todo")  # what needs it gets built
+        self.assertIn("you said work as they are", " ".join(e.get("text", "") for e in self.hub.events.read()))
+
+    def test_a_done_file_keeps_its_contract_unless_you_said_something_about_it(self):
+        from rclocal.hub_local import HUB_OWNER
+
+        script = py_script({"app/convert.py": [CONVERT_GOOD], "app/report.py": [REPORT_GOOD]})
+        self.run_round(script)
+        version = self.hub.contracts.get("app/convert.py")["version"]
+        script.plan = {**script.plan, "files": [{**CONVERT, "purpose": "Convert temperatures, put another way"}, REPORT],
+                       "guesses": []}
+        self.run_round(script)  # the planner only reworded it
+        self.assertEqual(self.hub.contracts.get("app/convert.py")["version"], version)
+        q = self.hub.ask(HUB_OWNER, "Anything about to_celsius?", critical=True, choice="no")
+        self.hub.answer(q["id"], "to_celsius should explain itself better")
+        self.run_round(script)
+        self.assertEqual(self.hub.contracts.get("app/convert.py")["version"], version + 1)
+        self.assertIn("already passes its tests", self.hub.task("app-convert-py")["summary"])  # not rebuilt
 
     def test_try_again_gives_the_builder_fresh_tries(self):
         script = py_script({"app/convert.py": [CONVERT_BAD], "app/report.py": [REPORT_GOOD]})
@@ -548,7 +602,7 @@ class WebRoundTest(HubCase):
         self.assertEqual([c["path"] for c in self.hub.contracts.all()], ["app/tip.js"])
         self.assertIn("page's own script", skipped[0])
 
-    def test_a_web_round_builds_logic_then_a_checked_page(self):
+    def test_a_web_round_makes_the_page_first_and_checks_it_once_the_logic_is_built(self):
         checked = []
 
         async def fake_check(screenshot=None):
@@ -560,11 +614,37 @@ class WebRoundTest(HubCase):
         rnd.runner.check_page = fake_check
         summary = asyncio.run(rnd.run())
         self.assertTrue(summary["tests_passed"])
+        starts = [e["task"] for e in self.hub.events.read() if e["type"] == "task_start"]
+        self.assertEqual(starts[0], DESIGN_TASK)
         self.assertEqual(self.statuses()[DESIGN_TASK], "done")
+        self.assertFalse(self.hub.task(DESIGN_TASK).get("soft"))  # checked in full by the end
         self.assertEqual((self.project / "index.html").read_text(), PAGE + "\n")
         self.assertTrue((self.project / "package.json").exists())
         self.assertIn("--accent", (self.project / "kit.css").read_text())
-        self.assertEqual(len(checked), 1)
+        self.assertIn(len(checked), (1, 2))  # once, or again after tip.js if the page was done first
+        self.assertTrue(rnd.page_checked)
+
+    def test_a_page_on_placeholders_only_has_to_load(self):
+        script = Script({"app/tip.js": [TIP_GOOD]}, WEB_TESTS, plan_of([TIP]))
+        rnd = Round(self.hub, FakeLLM(script))
+        rnd.number = 0
+        rnd.apply_plan(script.plan)
+        rnd.write_placeholders()
+        stand_in = (self.project / "app/tip.js").read_text()
+        self.assertIn(PLACEHOLDER, stand_in)
+        self.assertEqual(WEB.syntax_error(stand_in, "app/tip.js"), "")
+        self.assertTrue(rnd.is_placeholder("app/tip.js"))
+
+        async def fake_check(screenshot=None):  # it loads, but the numbers can't be right yet
+            rnd.runner.last_check = {"part": "script", "probe": {"ready": True}, "inventory": None, "hidden": []}
+            return False, "after filling in bill, nothing on the page changed"
+
+        rnd.runner.check_page = fake_check
+        self.hub.start_tasks(first=(DESIGN_TASK,))
+        status, _ = asyncio.run(rnd.settle_page(PAGE, CSS, [], 0))
+        self.assertEqual(status, "done")
+        self.assertTrue(self.hub.task(DESIGN_TASK)["soft"])
+        self.assertFalse(rnd.page_checked)  # so the test users wait too
 
     def tip_round(self, examples):
         tip = {**TIP, "exports": [export("tipFor", "function tipFor(bill, percent) -> number", examples=examples)]}
@@ -589,6 +669,27 @@ class WebRoundTest(HubCase):
     def test_a_wrong_example_holds_the_code_to_it(self):
         summary = self.tip_round([{"call": "tipFor(100, 15)", "returns": "16"}])
         self.assertFalse(summary["tests_passed"])  # the examples are the shared truth, even when wrong
+
+    def test_you_check_new_examples_and_your_correction_wins(self):
+        summary = self.tip_round([{"call": "tipFor(100, 15)", "returns": "16"}])
+        self.assertFalse(summary["tests_passed"])
+        q = next(q for q in self.hub.questions() if q.get("example"))
+        self.assertEqual((q["text"], q["choice"], q["status"]), ("Is this right? tipFor(100, 15) returns 16", "Right", "decided"))
+        self.hub.answer(q["id"], "15")  # what it should return
+        summary = self.tip_round([{"call": "tipFor(100, 15)", "returns": "16"}])  # the planner repeats its mistake
+        examples = self.hub.contracts.get("app/tip.js")["exports"][0]["examples"]
+        self.assertEqual(examples, [{"call": "tipFor(100, 15)", "returns": "15"}])
+        self.assertTrue(summary["tests_passed"])
+        self.assertEqual(sum(1 for q in self.hub.questions() if q.get("example")), 1)  # not asked again
+
+    def test_an_example_you_call_wrong_is_dropped(self):
+        self.tip_round([{"call": "tipFor(100, 15)", "returns": "16"}, {"call": "tipFor(0, 20)", "returns": "0"}])
+        wrong = next(q for q in self.hub.questions() if q.get("example") and "16" in q["text"])
+        self.hub.answer(wrong["id"], "Wrong")
+        summary = self.tip_round([{"call": "tipFor(100, 15)", "returns": "16"}, {"call": "tipFor(0, 20)", "returns": "0"}])
+        self.assertEqual(self.hub.contracts.get("app/tip.js")["exports"][0]["examples"],
+                         [{"call": "tipFor(0, 20)", "returns": "0"}])
+        self.assertTrue(summary["tests_passed"])
 
     def test_examples_that_are_not_code_are_left_out(self):
         summary = self.tip_round([{"call": "tipFor(100, 15", "returns": "15"}, {"call": "new Tip()", "returns": "{}"}])
@@ -974,6 +1075,29 @@ class DeskTest(unittest.TestCase):
         self.assertEqual(whos[:3], ["desk", "you", "brainstormer"])
         self.assertTrue((self.desk.hub.project / "PROJECT.md").exists())
 
+    def test_an_answer_can_be_changed(self):
+        self.desk.new("something for my book club")
+        self.settle()
+        self.desk.answer(0, "rank them")
+        self.desk.answer(0, "one vote each")  # changed your mind before sending it back
+        votes = [q for q in self.desk.hub.questions() if q["text"] == "How do people vote?"]
+        self.assertEqual([(q["status"], q["answer"]) for q in votes], [("answered", "one vote each")])
+        self.assertEqual(self.desk.state()["pending"][0]["answer"], "one vote each")
+        mine = [m for m in self.desk.chat() if m.get("ref")]
+        self.assertEqual(mine[-1]["ref"]["id"], votes[0]["id"])
+        self.assertIn("rank them", mine[-1]["ref"]["options"])
+        self.assertTrue(mine[-1]["text"].startswith("Changed my answer"))
+
+    def test_stop_ends_a_brainstorm_turn_partway(self):
+        self.desk.new("something for my book club")
+        self.settle()
+        self.desk.llm_for = lambda hub: FakeLLM(lambda *a: BRAINSTORM_REPLY, seconds=0.3)
+        self.desk.say("and a dark mode")
+        self.desk.stop()
+        self.settle()
+        self.assertIn("Stopped", self.desk.chat()[-1]["text"])
+        self.assertIsNone(self.desk.state()["stopping"])
+
     def test_one_job_at_a_time_and_a_project_first(self):
         with self.assertRaises(HubError):
             self.desk.say("hello")
@@ -1159,6 +1283,36 @@ class SchedulerTest(unittest.TestCase):
             ends = [e for e in events.read() if e["type"] == "llm_end"]
         self.assertEqual(peak[0], 1)
         self.assertEqual(len(ends), 4)
+
+
+class FailureDigestTest(unittest.TestCase):
+    def test_the_values_are_kept_and_the_stack_frames_dropped(self):
+        from rclocal.rounds import failure_digest
+
+        out = ("✖ splits (1.7ms)\nℹ tests 1\n  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n"
+               "      at TestContext.<anonymous> (file:///x/a.test.mjs:3:31)\n      at Test.run (node:internal/test_runner/test:1382:25) {\n"
+               "    generatedMessage: true,\n    actual: [ 50, 49 ],\n    expected: [ 49, 50 ],\n  }\n")
+        digest = failure_digest(out, 1000)
+        self.assertIn("actual: [ 50, 49 ]", digest)
+        self.assertIn("expected: [ 49, 50 ]", digest)
+        self.assertNotIn("node:internal", digest)
+        self.assertNotIn("ℹ tests", digest)
+        self.assertLessEqual(len(failure_digest(out * 50, 300)), 300)
+
+
+class LiveTest(unittest.TestCase):
+    def test_what_a_model_writes_is_kept_for_the_studio(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            events = Events(Path(tmp) / "e.jsonl")
+            sched = Scheduler(FakeLLM(lambda *a: {"notes": "all built"}), {"models": {"reporter": "m1"},
+                              "max_parallel_calls": 1}, events)
+            chat = [{"role": "system", "content": "Reporter: x"}, {"role": "user", "content": "y"}]
+            asyncio.run(sched.ask("reporter", chat, "report", reply="reporter"))
+            from rclocal.scheduler import Live
+            live = Live.read(Path(tmp) / "live.json")
+        self.assertEqual(live["running"], [])
+        self.assertEqual((live["recent"][0]["role"], live["recent"][0]["outcome"]), ("reporter", "done"))
+        self.assertIn("all built", live["recent"][0]["text"])
 
 
 class RunnerTest(unittest.TestCase):

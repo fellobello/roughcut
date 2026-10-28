@@ -36,12 +36,19 @@ one, or bring in existing code from a folder or GitHub repo), the project's file
   Type your own answer instead, or press Keep talking to take its picks. Build starts the rounds.
   Once it has built, the guesses it made and the files it left for you come up in the chat
   too, one at a time: the swarm asks on the left, and you answer in the box on the right.
+  Answered one wrong? **Change** under your answer brings its options back; changing an
+  answer rebuilds whatever was built on it. The message box stays on the bottom edge of
+  the window, and **Stop** replaces Build while something runs.
 - **Editor**: open any file from **Files** (the tree under the folder picker; files left for
   you have an orange dot). It shows the language, line numbers and whether it's saved; ⌘S
   saves. Beside the code: what the file must do (its contract and examples), and **Run its
   tests**, which runs them in the box and shows pass or fail. Only files inside the project
   can be opened or saved, and `.hub/` and `.git/` are read only.
-- **Progress**: the round as it runs: tasks, model calls, speed, what happened. Stop after this round.
+- **Progress**: the round as it runs. **Working now** shows what each model is writing as it
+  writes it (and its thinking, for a model with thinking on), and **Just finished** keeps the
+  last few replies to open. Then tasks, speed and what happened. **Stop now** cuts off the
+  call that's running and puts the files the round was on back to todo; **Stop after this
+  round** lets it finish first.
 - **App**: the app running inside the page, and every screenshot from the rounds and test users.
 - **Models**: whether Ollama answers, what's installed, and a model per role (changes are
   used from the next call). Performance settings will go here later.
@@ -58,6 +65,18 @@ contract's examples are checked one by one: any that aren't real values are left
 plan whose examples are mostly junk is asked for again. When the reviewer finds a contract
 that can't work (it contradicts you, or a function is missing an input), the next plan
 revises it, and the file gets a fresh set of tries.
+
+**You check the examples.** Small models get arithmetic wrong, and one wrong example fails a
+file that's right. So every new example a plan writes comes up in Talk as "Is this right?
+splitBill(99, 2) returns [49, 50]", taken as right until you answer. **Wrong** drops it from
+the contract and the tests, or type what it should return. Tests lean on what must hold
+(shares add up to the total) more than on hand-worked numbers, and the reviewer is shown
+the actual and expected values, not node's stack frames.
+
+**Finished files stay finished.** A plan can't change the contract of a file that's done
+unless something you've said since is about it (or you asked for changes in a talk). A file
+sent back by a change elsewhere is tested first, and kept if it still passes. For a file left
+for you, **It works** counts it as done as it is: the tests it fails don't hold anything back.
 
 **Nothing stops to ask you.** Like the Claude version, a run guesses and keeps going.
 
@@ -145,8 +164,11 @@ Every role has one job and its own model in `.hub/local.json` (the list is
        builder ──► an agent: picks read / write / test / finish / ask, step by step
        reviewer ─► still failing? blame the code (retry), the test (rewrite it) or the contract (ask you)
      │
-   designer (web) ──► index.html + styles.css from kit.css, checked in headless Chrome;
-                      a failed check rewrites only the part it flagged
+   designer (web) ──► first, as soon as there's a plan: index.html + styles.css from kit.css,
+                      on placeholder files that return their contracts' examples, so the
+                      page loads and can be tried while the logic is built. Checked in
+                      headless Chrome (only that it loads, until every file is built; then
+                      in full). A failed check rewrites only the part it flagged
      │
    every file's tests ──► failing files go back for one fix pass
      │
@@ -221,7 +243,7 @@ All message formats (each role's reply schema and every event type) are in one f
 | `projects` | List every project |
 | `trial --role <role>` | Try models on a dummy task for one role (below) |
 | `talk` | Talk about changes to this project before the next round |
-| `round --rounds N --ui` | Run rounds; stops early when everything passes or a round makes no progress |
+| `round --rounds N --ui` | Run rounds; stops early when everything passes, or when the next round would have nothing to do (what's left waits on a file left for you) |
 | `questions --ask` | Go through open questions and guesses one at a time |
 | `answer <id> --text ...` / `--keep` | Answer one |
 | `redo <task> --reason ...` | Send a task back |

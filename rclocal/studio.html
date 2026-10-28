@@ -24,9 +24,10 @@
     --bevel: inset 0 1px 0 rgb(255 255 255 / 6%), inset 0 -1px 0 rgb(0 0 0 / 35%); }
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 var(--font); }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 var(--font);
+  height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
 button, input, select, textarea { font: inherit; color: inherit; }
-.top { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 10px 12px; background: var(--panel); position: sticky; top: 0; z-index: 5; }
+.top { flex: none; display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 10px 12px; background: var(--panel); position: relative; z-index: 5; }
 .top h1 { font-size: 16px; margin: 0; letter-spacing: -.01em; }
 .top .where { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 200px; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -36,15 +37,17 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .icon:hover { color: var(--ink); border-color: var(--ink-3); }
 .icon.on { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
 .icon svg { width: 18px; height: 18px; }
-.layout { display: grid; grid-template-columns: 270px minmax(0, 1fr) 250px; min-height: calc(100vh - 55px); }
+.layout { flex: 1; min-height: 0; display: grid; grid-template-columns: 270px minmax(0, 1fr) 250px; }
 body.no-left .layout { grid-template-columns: 0 minmax(0, 1fr) 250px; }
 body.no-right .layout { grid-template-columns: 270px minmax(0, 1fr) 0; }
 body.no-left.no-right .layout { grid-template-columns: 0 minmax(0, 1fr) 0; }
 body.no-left #left, body.no-right #right { display: none; }
 #left { grid-column: 1; } main { grid-column: 2; } #right { grid-column: 3; }  /* each keeps its place when another hides */
-aside { padding: 16px; display: grid; gap: 18px; align-content: start; background: var(--panel); min-width: 0; }
+aside { padding: 16px; display: grid; gap: 18px; align-content: start; background: var(--panel); min-width: 0; overflow-y: auto; }
 
-main { padding: 16px; min-width: 0; }
+main { padding: 16px 16px 0; min-width: 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
+.tabs { flex: none; }
+.panel.on:not(#talk) { padding-bottom: 16px; }
 h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3); margin: 0 0 8px; }
 .list { display: grid; gap: 4px; }
 .proj { text-align: left; border: 1px solid transparent; background: none; padding: 8px 14px; border-radius: var(--radius-sm); cursor: pointer; }
@@ -141,10 +144,33 @@ h1 { letter-spacing: .02em; } h2, .msg .who, th { letter-spacing: .14em; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 /* Talk: no panels behind the chat or the message box, so they sit right on the page. */
 #talk .card { background: none; box-shadow: none; padding: 0 4px; margin-bottom: 0; }
-/* Talk fills the window: the chat scrolls in the middle, the message box stays at the bottom. */
-#talk.on { display: flex; flex-direction: column; gap: 14px; height: calc(100dvh - 150px); min-height: 360px; }
+/* Talk fills the rest of the window: the message box sits on the bottom edge, and the chat
+   fills everything above it, newest message just above the box, scrolling up from there. */
+#talk.on { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
 #talk > .card:first-child { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-#talk .chat { flex: 1; max-height: none; }
+#talk .chat { flex: 1; max-height: none; display: flex; flex-direction: column; }
+#chat { margin-top: auto; }  /* a short chat starts at the bottom, by the box */
+#talk > .card:last-child { padding-bottom: 12px; }
+#say { min-height: 48px; max-height: 30dvh; }
+.msg .change { display: block; margin: 6px 0 0 auto; border: 0; background: none; color: inherit; opacity: .75;
+  font: 600 11px var(--display); letter-spacing: .1em; text-transform: uppercase; cursor: pointer; padding: 0; }
+.msg .change:hover { opacity: 1; text-decoration: underline; }
+.changing { margin-top: -4px; }
+.reply.changing .row { flex-wrap: wrap; } .reply.changing .input { min-width: 160px; }
+
+/* Progress: what each model is writing, as it writes it. */
+.live { display: grid; gap: 12px; }
+.thought { background: var(--panel-2); border-radius: var(--radius-sm); padding: 12px 16px; box-shadow: var(--inset); min-width: 0; }
+.thought .head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; margin-bottom: 6px; }
+.thought .head b { font-family: var(--display); letter-spacing: .06em; text-transform: capitalize; }
+.thought pre { margin: 0; white-space: pre-wrap; word-break: break-word; font: 12px/1.5 var(--mono); color: var(--ink-2); max-height: 220px; overflow: auto; }
+.thought pre.thinking { color: var(--ink-3); font-style: italic; margin-bottom: 6px; max-height: 120px; }
+.thought .caret::after { content: "▍"; color: var(--accent); animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.recent details { border-top: 1px solid var(--line); padding: 6px 0; }
+.recent summary { cursor: pointer; color: var(--ink-2); font-size: 13px; }
+.recent pre { margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; font: 12px/1.5 var(--mono); color: var(--ink-2); max-height: 260px; overflow: auto; }
+.btn.stop { border-color: var(--bad); color: var(--bad); }
 /* Files: a Finder-like tree under the folder picker. */
 .files-head { display: flex; align-items: center; gap: 8px; }
 .files-head h2 { margin: 0; flex: 1; }
@@ -173,6 +199,9 @@ h1 { letter-spacing: .02em; } h2, .msg .who, th { letter-spacing: .14em; }
 @media (max-width: 1100px) { .edgrid { grid-template-columns: minmax(0, 1fr); } .code { height: 52dvh; } }
 
 @media (max-width: 900px) {
+  body { height: auto; display: block; overflow: visible; }
+  main { overflow: visible; padding-bottom: 16px; }
+  #talk.on { height: 85dvh; }
   .layout, body.no-left .layout, body.no-right .layout { grid-template-columns: minmax(0, 1fr); }
   #left, main, #right { grid-column: 1; }
   #left, #right { border: 0; border-bottom: 1px solid var(--line); }
@@ -230,7 +259,7 @@ h1 { letter-spacing: .02em; } h2, .msg .who, th { letter-spacing: .14em; }
         <button class="btn" id="moreBtn" title="Questions you haven't answered take the ★ pick, then it asks the next ones">Keep talking</button>
         <span style="flex:1"></span>
         <label class="muted">Rounds <input class="input" id="rounds" type="number" min="1" max="10" placeholder="auto" style="width:70px"></label>
-        <button class="btn primary" id="buildBtn">Build</button>
+        <button class="btn primary" id="buildBtn">Build</button><button class="btn stop" id="stopTalk" hidden>Stop</button>
       </div>
     </div>
   </section>
@@ -253,9 +282,11 @@ h1 { letter-spacing: .02em; } h2, .msg .who, th { letter-spacing: .14em; }
   <section class="panel" id="build">
     <div class="row" style="margin-bottom:12px">
       <span class="big" id="phase">Idle</span><span class="muted" id="elapsed"></span><span style="flex:1"></span>
-      <button class="btn primary" id="buildBtn2">Build</button><button class="btn" id="stopBtn">Stop after this round</button>
+      <button class="btn primary" id="buildBtn2">Build</button><button class="btn stop" id="stopBtn">Stop now</button>
+      <button class="btn" id="stopLater">Stop after this round</button>
     </div>
-    <div class="card"><h2>Running now</h2><div id="active" class="mono muted">Nothing.</div></div>
+    <div class="card"><h2>Working now</h2><div id="live" class="live"><span class="muted">Nothing.</span></div>
+      <div class="recent" id="recent"></div></div>
     <div class="card"><h2>Tasks</h2><div style="overflow-x:auto"><table><thead><tr><th>File</th><th>Job</th><th>Status</th><th>Tries</th><th>Summary</th></tr></thead><tbody id="tasks"></tbody></table></div></div>
     <div class="grid">
       <div class="card"><h2>Model speed this round</h2><table><thead><tr><th>Model</th><th>Calls</th><th>Time</th><th>tok/s</th></tr></thead><tbody id="speed"></tbody></table></div>
@@ -332,7 +363,8 @@ $("say").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey
 $("moreBtn").onclick = () => post("keep-talking");
 const build = () => post("build", { rounds: $("rounds").value || null });
 $("buildBtn").onclick = build; $("buildBtn2").onclick = build;
-$("stopBtn").onclick = () => post("stop");
+$("stopBtn").onclick = $("stopTalk").onclick = () => post("stop", { now: true });
+$("stopLater").onclick = () => post("stop", { now: false });
 const clearApp = () => { $("frame").innerHTML = ""; $("appLink").textContent = ""; };
 $("appBtn").onclick = () => post("app").then(d => {
   $("frame").innerHTML = `<iframe src="${esc(d.url)}" title="The app"></iframe>`;
@@ -352,7 +384,7 @@ function wireAsk(root, answer) {
 
 function chips(s) {
   const r = s.status.resources, m = r.memory, out = [];
-  if (s.busy) out.push(`<span class="chip busy">${esc(s.busy)}${s.stopping ? " · stopping after this round" : ""}…</span>`);
+  if (s.busy) out.push(`<span class="chip busy">${esc(s.busy)}${s.stopping ? " · stopping " + esc(s.stopping) : ""}…</span>`);
   if (m) out.push(`<span class="chip">Memory ${gb(m.used)} / ${gb(m.total)}</span>`);
   out.push(`<span class="chip">CPU ${r.load[0]} / ${r.cores}</span>`);
   out.push(`<span class="chip">${r.ollama.up ? "Ollama: " + (r.ollama.loaded.map(x => esc(x.name)).join(", ") || "idle") : "Ollama is not running"}</span>`);
@@ -370,16 +402,37 @@ function projectList(s) {
 function talk(s) {
   const chat = s.chat || [];
   if (chat.length !== lastChat) {
-    $("chat").innerHTML = chat.length ? chat.map(m =>
-      `<div class="msg ${esc(m.who)}"><div class="who">${esc(m.who === "you" ? "You" : m.who)}</div>${esc(m.text)}</div>`).join("")
+    const latest = {};  // only your latest answer to each question can be changed
+    chat.forEach((m, i) => { if (m.ref) latest[m.ref.id] = i; });
+    $("chat").innerHTML = chat.length ? chat.map((m, i) =>
+      `<div class="msg ${esc(m.who)}" data-i="${i}"><div class="who">${esc(m.who === "you" ? "You" : m.who)}</div>${esc(m.text)}${
+        m.ref && latest[m.ref.id] === i ? `<button class="change" data-change="${i}" title="Pick a different answer">Change</button>` : ""}</div>`).join("")
       : `<div class="empty">${s.project ? "Say what you'd like to build or change." : "Pick a project on the left, or start a new one."}</div>`;
+    $("chat").querySelectorAll("[data-change]").forEach(b => b.onclick = () => changeAnswer(chat[Number(b.dataset.change)].ref, b.closest(".msg")));
     $("chatbox").scrollTop = $("chatbox").scrollHeight;
     lastChat = chat.length;
   }
   const off = !s.project || !!s.busy;
   ["sayBtn", "buildBtn", "buildBtn2"].forEach(id => $(id).disabled = off);
   $("moreBtn").disabled = off || !s.pending.some(p => p.answer === null);
-  $("stopBtn").disabled = s.busy !== "building" || s.stopping;
+  const stoppable = (s.busy === "building" || s.busy === "thinking it through") && s.stopping !== "now";
+  $("stopBtn").disabled = !stoppable; $("stopLater").disabled = s.busy !== "building" || !!s.stopping;
+  $("stopTalk").hidden = !stoppable; $("buildBtn").hidden = stoppable;
+}
+
+// Change an answer you gave: its options again, right under it.
+function changeAnswer(ref, bubble) {
+  document.querySelectorAll(".changing").forEach(x => x.remove());
+  const box = document.createElement("div");
+  box.className = "reply changing"; box.dataset.ask = ref.id;
+  box.innerHTML = `<div class="count">Change your answer</div>
+    <div class="opts">${ref.options.map(o => `<button class="opt ${o === ref.pick ? "pick" : ""}" data-value="${esc(o)}" ${ref.details[o] ? `data-detail="${esc(ref.details[o])}"` : ""}>${esc(o)}</button>`).join("")}</div>
+    <div class="row"><input class="input" style="flex:1" placeholder="Or your own answer" data-own><button class="btn" data-ownbtn>Answer</button><button class="btn" data-cancel>Cancel</button></div>`;
+  bubble.after(box);
+  box.querySelector("[data-cancel]").onclick = () => box.remove();
+  wireAsk(box.parentNode, (id, value) => post("question", { id, text: value }).then(() => box.remove()));
+  box.scrollIntoView({ block: "nearest" });
+  box.querySelector("[data-own]").focus({ preventScroll: true });
 }
 
 function buildPanel(s) {
@@ -387,7 +440,7 @@ function buildPanel(s) {
   if (!st.tasks) { $("tasks").innerHTML = '<tr><td colspan="5" class="muted">No project open.</td></tr>'; return; }
   $("phase").textContent = s.busy === "building" ? `Round ${st.round}: ${st.phase || "starting"}` : (st.tasks.length ? `Round ${s.project.round} next` : "Not built yet");
   $("elapsed").textContent = st.running && st.started ? `${Math.round((st.now - st.started) / 60)} min` : "";
-  $("active").innerHTML = st.active.length ? st.active.map(a => `${esc(a.role)} · ${esc(a.model)} · ${esc(a.label)} · ${a.elapsed}s`).join("<br>") : "Nothing.";
+  livePanel(st.live || { running: [], recent: [] }, st.now);
   $("tasks").innerHTML = st.tasks.map(t => `<tr><td class="mono">${esc(t.module)}</td><td>${t.kind === "test" ? "tests" : t.module === "index.html" ? "page" : "code"}</td><td class="${t.status}">${t.status.replace("_", " ")}</td><td>${t.attempts}</td><td>${esc(t.summary)}</td></tr>`).join("")
     || '<tr><td colspan="5" class="muted">No tasks yet: talk it through, then Build.</td></tr>';
   $("speed").innerHTML = Object.entries(st.models).map(([k, v]) => `<tr><td class="mono">${esc(k)}</td><td>${v.calls}</td><td>${v.seconds}s</td><td>${v.tokens_per_second}</td></tr>`).join("")
@@ -405,6 +458,24 @@ function buildPanel(s) {
   if (changed("log", st.events.length && st.events[st.events.length - 1].ts))
     $("log").innerHTML = st.events.slice().reverse().map(e =>
       `<div><span class="muted">${new Date(e.ts * 1000).toLocaleTimeString()}</span> ${esc((say[e.type] || (x => x.type))(e))}</div>`).join("") || '<span class="muted">Nothing yet.</span>';
+}
+
+// What each model is writing now (the end of it, as it comes in), and the last few replies that finished.
+const openRecent = new Set();
+function livePanel(live, now) {
+  if (changed("live", live.running.map(r => [r.call, r.text.length, r.thinking.length]))) {
+    $("live").innerHTML = live.running.length ? live.running.map(r => `<div class="thought">
+      <div class="head"><b>${esc(r.role)}</b><span class="muted">${esc(r.label)} · ${esc(r.model)} · <span data-since="${r.started}"></span></span></div>
+      ${r.thinking ? `<pre class="thinking">${esc(r.thinking)}</pre>` : ""}<pre class="stream">${esc(r.text) || '<span class="muted">reading its prompt…</span>'}<span class="caret"></span></pre></div>`).join("")
+      : '<span class="muted">Nothing running.</span>';
+    $("live").querySelectorAll("pre").forEach(p => p.scrollTop = p.scrollHeight);  // follow the newest text
+  }
+  $("live").querySelectorAll("[data-since]").forEach(x => x.textContent = Math.round(now - Number(x.dataset.since)) + "s");
+  if (!changed("recent", live.recent.map(r => r.call))) return;
+  $("recent").innerHTML = live.recent.length ? `<h2 style="margin-top:14px">Just finished</h2>` + live.recent.map(r =>
+    `<details data-call="${r.call}" ${openRecent.has(r.call) ? "open" : ""}><summary><b>${esc(r.role)}</b> · ${esc(r.label)} · ${Math.round(r.ended - r.started)}s${r.outcome !== "done" ? ` · <span class="bad">${esc(r.outcome)}</span>` : ""}</summary>
+      ${r.thinking ? `<pre class="muted"><i>${esc(r.thinking)}</i></pre>` : ""}<pre>${esc(r.text)}</pre></details>`).join("") : "";
+  $("recent").querySelectorAll("details").forEach(d => d.ontoggle = () => { const c = Number(d.dataset.call); d.open ? openRecent.add(c) : openRecent.delete(c); });
 }
 
 // The question being asked, at the end of the chat: the swarm asks on the left, your
@@ -577,7 +648,8 @@ async function refresh() {
     drawTree(s);
   } catch (e) { $("where").textContent = "Display error: " + e; console.error(e); }
 }
-refresh(); setInterval(refresh, 2000);
+// Every second while something runs, so the models' writing streams in; every 2 s otherwise.
+(async function loop() { await refresh(); setTimeout(loop, state && state.busy ? 1000 : 2000); })();
 </script>
 </body>
 </html>

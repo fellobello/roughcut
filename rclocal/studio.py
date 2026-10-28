@@ -37,6 +37,8 @@ def full_state(desk):
     state["projects"] = projects()
     if hub:
         state["status"] = snapshot(hub, desk.llm_for(hub))
+        if not desk.busy:  # replies a stopped process left as running aren't running
+            state["status"]["live"]["running"] = []
         state["stage"] = desk.stage(state["status"])
         state["screens"] = sorted(p.name for p in (hub.root / "screens").glob("*.png")) if (hub.root / "screens").exists() else []
         state["questions"] = [q for q in hub.questions() if q["status"] == "open" or (q["status"] == "decided" and q["critical"])]
@@ -59,7 +61,7 @@ def make_server(desk, port=8770, host="127.0.0.1"):
         "answer": lambda b: desk.answer(int(b["index"]), b.get("reply", "")),
         "keep-talking": lambda b: desk.keep_talking(),
         "build": lambda b: desk.build(int(b["rounds"]) if b.get("rounds") else None),
-        "stop": lambda b: desk.stop(),
+        "stop": lambda b: desk.stop(now=bool(b.get("now", True))),
         "question": lambda b: desk.answer_question(b["id"], b.get("text"), bool(b.get("keep"))),
         "app": lambda b: desk.app_url(),
         "model": lambda b: desk.set_model(b["role"], b["model"]),

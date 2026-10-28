@@ -16,6 +16,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from .llm import LLMError
 from .runner import Runner
+from .scheduler import Live
 
 
 def _run(cmd):
@@ -105,6 +106,7 @@ def snapshot(hub, client):
         ],
         "questions": {"open": len(status["open_questions"]), "guesses": len(status["guesses_to_confirm"])},
         "active": [{**e, "elapsed": round(now - e["ts"], 1)} for e in open_calls.values()],
+        "live": Live.read(hub.root / "live.json"),
         "models": per_model,
         "events": [e for e in in_round if e["type"] not in ("llm_start",)][-40:],
         "resources": resources(client),

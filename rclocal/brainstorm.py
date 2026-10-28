@@ -27,6 +27,7 @@ class Brainstorm:
         self.hub = hub
         self.path = hub.root / "brainstorm.json"
         self.talk = json.loads(self.path.read_text(encoding="utf-8")) if self.path.exists() else []
+        self.last_id = None  # the hub question the last answer went to
 
     def start(self, thoughts):
         """Begin a session with what you want: the idea, or the changes you have in mind."""
@@ -74,11 +75,14 @@ class Brainstorm:
         elif len(text) == 1 and text.lower() in LETTERS[: len(question["options"])]:
             text = question["options"][LETTERS.index(text.lower())]
         details = question.get("details", {})
-        q = self.hub.ask(
-            HUB_OWNER, question["text"], critical=True, choice=question["default"] or text,
-            why=question["why"], options=[{"label": o, "detail": details.get(o, "")} for o in question["options"]],
-        )
+        q = next((q for q in self.hub.questions() if q["task"] == HUB_OWNER and q["text"] == question["text"]), None)
+        if q is None:  # asked again (an answer being changed) it's the same question, not a new one
+            q = self.hub.ask(
+                HUB_OWNER, question["text"], critical=True, choice=question["default"] or text,
+                why=question["why"], options=[{"label": o, "detail": details.get(o, "")} for o in question["options"]],
+            )
         self.hub.answer(q["id"], text)
+        self.last_id = q["id"]
         self.talk.append({"who": "you", "text": f"{question['text']} -> {text}"})
         self.save()
         return text

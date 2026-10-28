@@ -11,8 +11,11 @@ test, finish, ask), but every step is carried out here and only if it's allowed:
 can read only its file, its tests and the files it imports, write only its own file,
 and nothing it writes runs until the stack's guard has passed it. When an agent runs
 out of steps with failing tests, a reviewer decides whether the code, the test or the
-contract is wrong. On the web stack, a designer then makes index.html and styles.css,
-and the page is loaded in headless Chrome to check that it works.
+contract is wrong. On the web stack the page comes first: a designer makes index.html and
+styles.css as soon as there's a plan, against placeholder files that return their
+contracts' examples, so you can open the app and try it while the logic is built. It's
+loaded in headless Chrome to check that it loads, and checked fully (and tried by the
+test users) once every logic file is done.
 """
 
 from __future__ import annotations
@@ -26,11 +29,11 @@ import subprocess
 from . import agents, pages, project
 from .contracts import ContractError, file_id
 from .hub_local import HUB_OWNER, HubError
-from .llm import LLMError
+from .llm import Interrupted, LLMError
 from .notify import awake, notify
 from .runner import Runner
 from .scheduler import Scheduler
-from .stacks import example_cases, filter_styles
+from .stacks import PLACEHOLDER, example_cases, filter_styles
 from .users import TestUsers
 
 OPEN_FENCE = re.compile(r"^\s*```[a-zA-Z]*[ \t]*\n")
@@ -42,13 +45,24 @@ MAX_GUESSES = 3  # per plan, so the questions you get are few and real
 # the file is left for you, and the run goes on with everything else.
 # The answers are your replies, so they're in your voice.
 I_GOT_IT = "I got it"
+IT_WORKS = "It works"
 KEEP_ANSWERS = {I_GOT_IT, "Left for you"}  # "Left for you" is what earlier versions wrote
 STUCK_OPTIONS = [
     {"label": I_GOT_IT, "detail": "You'll finish it yourself. It keeps its best attempt, with a note at the top saying "
                                   "what's missing; once its tests pass, the next round picks it up."},
+    {"label": IT_WORKS, "detail": "It does what you want as it is: count it as done. The tests it fails stay, but they "
+                                  "don't hold anything back, and the files that need it get built."},
     {"label": "Try again", "detail": "The builder gets a fresh set of tries next round, with what you say here."},
     {"label": "Simplify it", "detail": "The planner trims what this file promises next round, then it's built again."},
 ]
+# Small models get arithmetic wrong, and a wrong example fails a right file. So you check each new one.
+RIGHT, WRONG = "Right", "Wrong"
+EXAMPLE_OPTIONS = [
+    {"label": RIGHT, "detail": "Keep it: the file's tests hold it to this."},
+    {"label": WRONG, "detail": "Drop it from the contract and the tests. Or type what it should return instead."},
+]
+MAX_EXAMPLE_CHECKS = 4  # per plan
+EXAMPLES_TESTS = ("the contract examples hold", "ContractExamples")  # the test stacks.example_tests adds
 KEEP_TURNS = 12  # agent messages kept after the opening two, so its context stays small
 SPLIT_AFTER = 2  # failed attempts with the code to blame before a file is split into smaller ones
 MAX_PIECES = 4
@@ -64,6 +78,36 @@ def clean_code(text):
     """The file inside a code reply. Generation stops at the closing fence, so it is usually gone already."""
     text = OPEN_FENCE.sub("", text, count=1)
     return CLOSE_FENCE.sub("", text).strip() + "\n"
+
+
+STACK_LINE = re.compile(r"^\s+at |node:internal|^\s*(generatedMessage|code|operator|diff):|^\s*[{}]\s*$|^ℹ ")
+
+
+def failure_digest(output, limit):
+    """The part of a test run that says what went wrong, at most `limit` characters.
+
+    The end of node's output is a summary ("test failed"); the error and the actual and
+    expected values come before it, buried in stack frames. Keep those, drop the frames.
+    """
+    lines = [l for l in (output or "").splitlines() if not STACK_LINE.search(l)]
+    text = re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+    return text if len(text) <= limit else text[: limit - 15] + "\n… (cut short)"
+
+
+def examples_of(contract):
+    return {(e["name"], x["call"], x["returns"]) for e in contract["exports"] for x in e.get("examples", [])}
+
+
+def with_verdicts(export, verdicts):
+    """An export with your answers about its examples applied: wrong ones out, corrected ones fixed."""
+    examples = []
+    for x in export.get("examples", []):
+        said = verdicts.get((export["name"], x["call"], x["returns"]))
+        if said is None or said == RIGHT:
+            examples.append(x)
+        elif said.lower() != WRONG.lower():
+            examples.append({**x, "returns": said})
+    return {**export, "examples": examples}
 
 
 def norm(path):
@@ -106,13 +150,13 @@ def check_code(stack, code, path, exports=()):
 
 
 class Round:
-    def __init__(self, hub, llm, echo=None):
+    def __init__(self, hub, llm, echo=None, cancel=None):
         self.hub = hub
         self.cfg = hub.local_config()
         self.stack = hub.stack
         self.events = hub.events
         self.events.echo = echo
-        self.sched = Scheduler(llm, self.cfg, self.events)
+        self.sched = Scheduler(llm, self.cfg, self.events, cancel)
         self.runner = Runner(hub.project, self.stack, self.cfg["test_timeout"], self.cfg["sandbox"], self.events)
         self.requests = []  # (task id, contract request), applied between tasks
         self.number = None
@@ -130,6 +174,7 @@ class Round:
             self.events.emit("note", text="sandbox-exec isn't available: tests run with limits but without the sandbox")
         hub.release()
         await self.revisit_stuck()
+        self.apply_example_answers()
         for task_id in hub.retry_failed():
             self.events.emit("note", text=f"retrying {task_id}, which failed last round")
 
@@ -139,6 +184,8 @@ class Round:
 
         self.events.emit("phase", name="build")
         await self.build_pass(idea)
+        if self.recheck_page():
+            await self.build_pass(idea)
 
         self.events.emit("phase", name="verify")
         passed, failing, output = await self.verify()
@@ -222,6 +269,8 @@ class Round:
                 continue
             if q["text"].startswith("What should change next?"):
                 continue  # a change request, handled by the plan it was asked for
+            if q.get("example") and q["answer"] == RIGHT:
+                continue  # nothing to follow; a wrong example is worth saying, so the planner doesn't repeat it
             lines.append(f"- {q['text']} -> {q['answer']}")
         return "\n".join(lines[-MAX_RULES:])
 
@@ -235,9 +284,11 @@ class Round:
         for guess in [g for g in reply["guesses"] if g["text"].strip() and g["text"].strip() not in asked][:MAX_GUESSES]:
             self.decide(HUB_OWNER, guess, critical=True)
         planned, skipped = [], []
+        protected, verdicts, checks = self.protected(), self.example_verdicts(), []
         for file_plan in reply["files"]:
             tidy = {**file_plan, "path": tidy_path(file_plan["path"], self.stack),
                     "imports": [tidy_path(p, self.stack) for p in file_plan["imports"] if p.strip()]}
+            tidy["exports"] = [with_verdicts(e, verdicts) for e in tidy["exports"]]
             if tidy["path"] != file_plan["path"]:
                 self.events.emit("note", text=f"renamed {file_plan['path']} to {tidy['path']} to fit the layout")
             stem = posixpath.splitext(posixpath.basename(tidy["path"]))[0]
@@ -246,6 +297,11 @@ class Round:
                 self.events.emit("note", text=f"skipped a planned file: {why}")
                 skipped.append(why)
                 continue
+            if tidy["path"] in protected and contracts.would_change(tidy):
+                self.events.emit("note", text=f"kept {tidy['path']} as it is: it's done, and nothing you've said "
+                                              "since is about it")
+                continue
+            had = examples_of(contracts.get(tidy["path"])) if contracts.exists(tidy["path"]) else set()
             try:
                 contract, what = contracts.upsert(tidy, self.number, f"round {self.number} plan")
             except (ContractError, ValueError) as e:
@@ -253,6 +309,8 @@ class Round:
                 skipped.append(str(e))
                 continue
             planned.append((contract, what))
+            checks += [(contract, e, x) for e in contract["exports"] for x in e.get("examples", [])
+                       if (e["name"], x["call"], x["returns"]) not in had and self.stack.example_ok(x["call"], x["returns"])]
         known = {c["path"] for c in contracts.all()}
         for i, (contract, what) in enumerate(planned):
             unknown = [p for p in contract["imports"] if p not in known]
@@ -276,6 +334,7 @@ class Round:
             if what == "changed":
                 for path in contracts.dependents(contract["path"]):
                     self.redo(file_id(path), f"{contract['path']} changed to contract v{contract['version']}")
+        self.check_examples(checks)
         if self.stack.name == "web" and contracts.all():
             self.ensure_design_task(changed)
         self.write_packages()
@@ -283,6 +342,76 @@ class Round:
         if errors:
             raise HubError("the plan's task graph is invalid: " + "; ".join(errors))
         return skipped
+
+    def protected(self):
+        """Files a plan may not change: done, and nothing you've said since the last plan is about them.
+
+        A small planner rewrites contracts it was only meant to repeat, which rebuilds files that
+        worked (one you finished by hand, even). When you asked for changes ("What should change
+        next?"), nothing is protected: those can touch any file.
+        """
+        hub = self.hub
+        answers = hub.answered_since(self.number)
+        if any(q["text"].startswith("What should change next?") for q in answers):
+            return set()
+        done = {t["id"] for t in hub.tasks() if t["kind"] == "build" and t["status"] == "done"}
+        kept = set()
+        for c in hub.contracts.all():
+            if c["id"] not in done or self.is_placeholder(c["path"]):
+                continue
+            names = [c["path"], posixpath.basename(c["path"])] + [e["name"] for e in c["exports"]]
+            about = any(
+                q["task"] in (c["id"], c["id"] + "-tests")
+                or any(n.lower() in f"{q['text']} {q['answer'] or ''}".lower() for n in names)
+                for q in answers
+            )
+            if not about:
+                kept.add(c["path"])
+        return kept
+
+    def example_verdicts(self):
+        """Your answers about examples: (export, call, returns) -> RIGHT, WRONG or the value it should be."""
+        return {(q["example"]["name"], q["example"]["call"], q["example"]["returns"]): q["answer"].strip()
+                for q in self.hub.questions() if q.get("example") and q["status"] == "answered"}
+
+    def check_examples(self, checks):
+        """Ask you about the plan's new examples. Each is taken as right until you say otherwise."""
+        asked = {q["text"] for q in self.hub.questions()}
+        for contract, export, example in checks[:MAX_EXAMPLE_CHECKS]:
+            text = f"Is this right? {example['call']} returns {example['returns']}"
+            if text in asked:
+                continue
+            q = self.hub.ask(
+                HUB_OWNER, text, critical=True, choice=RIGHT, options=EXAMPLE_OPTIONS,
+                why=f"From {contract['path']}: {export['description']}",
+                meta={"example": {"path": contract["path"], "name": export["name"], "call": example["call"],
+                                  "returns": example["returns"]}},
+            )
+            self.events.emit("question", id=q["id"], text=q["text"], blocking=False)
+
+    def apply_example_answers(self):
+        """At the start of a round: an example you said is wrong is dropped, or corrected to your value."""
+        hub = self.hub
+        for q in hub.questions():
+            if not q.get("example") or q["status"] != "answered" or q.get("acted"):
+                continue
+            hub.mark_acted(q["id"])
+            answer, ex = q["answer"].strip(), q["example"]
+            if answer == RIGHT:
+                continue
+            value = None if answer.lower() == WRONG.lower() else answer
+            if value is not None and not self.stack.example_ok(ex["call"], value):
+                self.events.emit("note", text=f"{value!r} isn't a value in {self.stack.lang_name}, so "
+                                              f"{ex['call']} is dropped instead")
+                value = None
+            contract = hub.contracts.set_example(ex["path"], ex["name"], ex["call"], ex["returns"], value, self.number,
+                                                 "you said an example was wrong")
+            if contract is None:
+                continue  # already changed since
+            self.events.emit("note", text=f"{ex['path']}: {ex['call']} " + (
+                f"now returns {value}, as you said" if value is not None else "is dropped, as you said it's wrong"))
+            self.events.emit("contract", path=contract["path"], version=contract["version"], reason="an example you corrected")
+            self.ensure_tasks(contract, "changed")
 
     def untangle(self, order=()):
         """Break circular imports. Returns the (file, import) pairs dropped.
@@ -335,18 +464,45 @@ class Round:
             self.redo(task_id, f"contract changed to v{contract['version']}")
 
     def ensure_design_task(self, changed):
-        """The page waits for every logic file, and is redone when any contract changes."""
+        """The page starts as soon as there's a plan (it needs only the contracts), and is redone when one changes."""
         hub = self.hub
-        build_ids = [c["id"] for c in hub.contracts.all()]
         if not any(t["id"] == DESIGN_TASK for t in hub.tasks()):
-            hub.add_task(DESIGN_TASK, "Design the page", "build", "index.html", build_ids, "index.html and styles.css")
+            hub.add_task(DESIGN_TASK, "Design the page", "build", "index.html", (), "index.html and styles.css")
             return
-        hub.set_depends(DESIGN_TASK, build_ids)
+        hub.set_depends(DESIGN_TASK, [])  # projects planned before the page came first waited for every file
         if changed:
             self.redo(DESIGN_TASK, "the contracts changed")
 
+    def logic_left(self):
+        """Logic files that aren't done yet. While there are any, the page runs on placeholders."""
+        return [t["module"] for t in self.hub.tasks() if t["kind"] == "build" and t["id"] != DESIGN_TASK
+                and t["status"] != "done"]
+
+    def write_placeholders(self):
+        """A stand-in for every planned file that doesn't exist yet, so the page can load and be tried."""
+        for contract in self.hub.contracts.all():
+            path = self.hub.project / contract["path"]
+            if not path.exists():
+                self.hub._write_text(path, self.stack.placeholder(contract))
+
+    def is_placeholder(self, path):
+        file = self.hub.project / path
+        return file.exists() and PLACEHOLDER in file.read_text(encoding="utf-8")[:300]
+
+    def recheck_page(self):
+        """Once every logic file is done, a page only checked against placeholders gets its full check."""
+        if self.stack.name != "web" or self.logic_left():
+            return False
+        task = next((t for t in self.hub.tasks() if t["id"] == DESIGN_TASK), None)
+        if not task or task["status"] != "done" or not task.get("soft"):
+            return False
+        self.hub.retry(DESIGN_TASK, "every logic file is built now: check the page works with them")
+        return True
+
     def redo(self, task_id, reason):
         task = self.hub.task(task_id)
+        if task.get("accepted"):
+            self.hub.set_field(task_id, "accepted", False)  # a new contract is a new job
         if task["status"] == "failed":
             self.hub.restart(task_id, reason)  # a new contract is a new job: fresh tries
         elif task["status"] in ("done", "blocked"):
@@ -374,7 +530,7 @@ class Round:
         while True:
             free = limit - len(running)
             if free > 0:
-                for task in self.hub.start_tasks(free):
+                for task in self.hub.start_tasks(free, first=(DESIGN_TASK,)):
                     running[task["id"]] = asyncio.ensure_future(self.run_task(task, idea))
             if not running:
                 break
@@ -470,6 +626,10 @@ class Round:
             notes, readable, steps, self.rules(),
         )
         code = target.read_text(encoding="utf-8") if target.exists() else ""
+        if code and not self.is_placeholder(path) and not check_code(stack, code, path, contract["exports"])[0]:
+            passed, _ = await self.runner.run(test_path)  # sent back by a change elsewhere: maybe it still works
+            if passed:
+                return "done", f"{path} already passes its tests, so it's kept as it is", None
         passed, failure, writes = False, "", 0
         for step_no in range(1, steps + 1):
             step = await agents.next_step(self.sched, messages, f"step:{path}")
@@ -501,7 +661,7 @@ class Round:
                     failure = "" if passed else output
                     seen = "All tests pass." if passed else self.failed_tests(output, code)
             elif action == "finish":
-                seen = "" if passed else f"You can't finish while the tests fail. {failure[-1500:] or 'Write your file first.'}"
+                seen = "" if passed else f"You can't finish while the tests fail. {failure_digest(failure, 1500) or 'Write your file first.'}"
             else:  # ask: nobody waits for an answer; the file is left for you with the agent's question
                 return (*self.hand_over(task, contract, code, note or "the builder says the contract can't work", failure),
                         None)
@@ -526,7 +686,7 @@ class Round:
 
     @staticmethod
     def failed_tests(output, code):
-        return f"Its tests fail:\n{output[-1800:]}\n\nYour file now:\n```\n{code[:5000]}\n```"
+        return f"Its tests fail:\n{failure_digest(output, 1800)}\n\nYour file now:\n```\n{code[:5000]}\n```"
 
     async def take_notes(self, task, contract, code, failure, learned):
         """Ask the builder what it decided and needs. Optional: a failed call only loses the notes."""
@@ -548,8 +708,11 @@ class Round:
         hub = self.hub
         test_file = hub.project / contract["test_path"]
         test_code = test_file.read_text(encoding="utf-8") if test_file.exists() else ""
-        verdict = await agents.review(self.sched, hub.contracts.brief(contract["path"]), test_code, code, failure, self.rules())
+        verdict = await agents.review(self.sched, hub.contracts.brief(contract["path"]), test_code, code,
+                                      failure_digest(failure, 2500), self.rules())
         reason = verdict["reason"].strip() or "no reason given"
+        if verdict["blame"] == "test" and any(name in failure for name in EXAMPLES_TESTS):
+            verdict = {**verdict, "blame": "contract"}  # the failing check is the contract's own examples
         self.events.emit("note", text=f"review of {contract['path']}: blame {verdict['blame']}: {reason}")
         max_attempts = hub.config()["max_attempts"]
         test_id = contract["id"] + "-tests"
@@ -670,7 +833,8 @@ class Round:
             if task["status"] != "failed" or task["kind"] != "build" or task["module"] == "index.html":
                 continue
             contract = hub.contracts.get(task["module"])
-            if (hub.project / contract["path"]).exists() and (hub.project / contract["test_path"]).exists():
+            if (hub.project / contract["path"]).exists() and (hub.project / contract["test_path"]).exists() \
+                    and not self.is_placeholder(contract["path"]):
                 passed, _ = await self.runner.run(contract["test_path"])
                 if passed:
                     hub.mark_done(task["id"], f"{contract['path']} passes its tests now (finished by you)")
@@ -680,6 +844,11 @@ class Round:
                 if q["task"] != task["id"] or q["status"] != "answered" or q.get("acted"):
                     continue
                 hub.mark_acted(q["id"])
+                if q["answer"] == IT_WORKS:
+                    hub.mark_done(task["id"], f"{contract['path']} works as it is (you said so)")
+                    hub.set_field(task["id"], "accepted", True)
+                    self.events.emit("note", text=f"{contract['path']}: done, because you said it works as it is")
+                    break
                 if q["answer"] not in KEEP_ANSWERS:
                     hub.restart(task["id"], f"you said: {q['answer']}")
                     self.events.emit("note", text=f"{contract['path']}: trying again, because you said: {q['answer']}")
@@ -694,7 +863,10 @@ class Round:
                 hub._write_text(hub.project / name, text)  # projects made before the kit existed
         notes = list(task["notes"])
         tries = self.cfg["design_tries"]
+        self.write_placeholders()
         html, css = self.read_page()
+        if html and not self.page_problem(html) and task.get("soft") and not self.logic_left():
+            return await self.settle_page(html, css, notes, tries)  # check it first; fix only what fails
         if html and not self.page_problem(html):
             why = "; ".join(n.removeprefix("retry: ") for n in notes[-3:]) or "make the page better"
             picked = await agents.pick_page_part(self.sched, html, why)
@@ -751,8 +923,15 @@ class Round:
                     self.write_page(html, css)
                     ok, problem = await self.runner.check_page(screenshot=screen)
                     check = getattr(self.runner, "last_check", None) or {}
+            left = self.logic_left()
+            if not ok and left and check.get("probe") and check["probe"].get("ready"):
+                # It loads; what it shows can't be judged until the files behind it are built.
+                self.hub.set_field(DESIGN_TASK, "soft", True)
+                self.events.emit("note", text=f"the page loads; it gets its full check once these are built: {', '.join(left)}")
+                return "done", "index.html loads, running on placeholders until the logic files are built"
             if ok:
-                self.page_checked = True
+                self.hub.set_field(DESIGN_TASK, "soft", bool(left))
+                self.page_checked = not left
                 fixed = f" after {attempt} fix{'es' if attempt != 1 else ''}" if attempt else ""
                 return "done", "index.html and styles.css work in the browser" + fixed + (f" ({problem})" if problem else "")
             part = check.get("part") or "script"
@@ -881,12 +1060,16 @@ class Round:
 
         results = await asyncio.gather(*(one(c) for c in built))
         for c, (ok, _) in results:  # a file left for you that passes now (you finished it) is done
-            if ok and self.hub.task(c["id"])["status"] == "failed":
+            if ok and self.hub.task(c["id"])["status"] == "failed" and not self.is_placeholder(c["path"]):
                 self.hub.mark_done(c["id"], f"{c['path']} passes its tests now (finished by you)")
-        failing = [c for c, (ok, _) in results if not ok]
-        output = "\n".join(f"{c['test_path']}:\n{out[-600:]}" for c, (ok, out) in results if not ok)
+        accepted = {t["id"] for t in self.hub.tasks() if t.get("accepted")}  # you said they work as they are
+        failing = [c for c, (ok, _) in results if not ok and c["id"] not in accepted]
+        output = "\n".join(f"{c['test_path']}:\n{failure_digest(out, 600)}" for c, (ok, out) in results
+                            if not ok and c["id"] not in accepted)
         everything = len(built) == len(self.hub.contracts.all())
-        self.events.emit("note", text=f"verify: {len(built) - len(failing)} of {len(self.hub.contracts.all())} files pass")
+        waived = sum(1 for c, (ok, _) in results if not ok and c["id"] in accepted)
+        self.events.emit("note", text=f"verify: {len(built) - len(failing) - waived} of {len(self.hub.contracts.all())} "
+                                      "files pass" + (f", and {waived} you said work as they are" if waived else ""))
         return bool(built) and not failing and everything, failing, output
 
     def reopen(self, failing):
@@ -913,33 +1096,49 @@ class Round:
         commit(self.hub.project, message)
 
 
-def run_rounds(hub, llm, rounds, echo=None, stop=lambda: False):
+def run_rounds(hub, llm, rounds, echo=None, stop=lambda: False, cancel=None):
     """Run up to `rounds` rounds in a row, keeping the Mac awake. Returns (summaries, why it stopped).
 
     Nothing stops to ask you: stuck files are left for you and recorded as guesses, and
     questions pile up for whenever you look. It stops when the planner says the idea is
-    covered and every test passes, when a round makes no progress, or when stop() says so
-    (checked between rounds), and sends one notification saying how it went.
+    covered and every test passes, when the next round would have nothing to work on (what's
+    left waits on a file left for you, or the round made no progress), when stop() says so
+    (checked between rounds), or partway through a round when cancel() does; the files a
+    stopped round was on go back to todo. It sends one notification saying how it went.
     """
     summaries, why = [], f"ran the {rounds} round{'s' if rounds != 1 else ''} asked for"
     with awake():
         for _ in range(rounds):
             before = sum(t["status"] == "done" for t in hub.tasks())
-            summary = asyncio.run(Round(hub, llm, echo=echo).run())
+            try:
+                summary = asyncio.run(Round(hub, llm, echo=echo, cancel=cancel).run())
+            except Interrupted:
+                hub.release()
+                hub.events.emit("round_end", summary={"round": hub.config()["round"], "stopped": True})
+                why = "you stopped it partway through a round"
+                break
             summaries.append(summary)
-            after = sum(t["status"] == "done" for t in hub.tasks())
-            todo = any(t["status"] == "todo" for t in hub.tasks())
-            if summary["complete"] and not todo and summary["tests_passed"]:
+            if summary["complete"] and not workable(hub) and summary["tests_passed"]:
                 why = "the planner says the idea is covered and every test passes"
                 break
-            if after == before and not todo:
-                why = "the last round made no progress"
+            waiting = any(t["status"] == "todo" for t in hub.tasks())  # todo but not ready: waits on a stuck file
+            progress = sum(t["status"] == "done" for t in hub.tasks()) > before
+            if not workable(hub) and (waiting or not progress):  # with neither, the next plan may add files
+                stuck = [t["module"] for t in hub.tasks() if t["status"] == "failed" and t["kind"] == "build"]
+                why = "nothing is left that it can work on" + (
+                    f": what's left waits on {', '.join(stuck)}, left for you" if stuck else "")
                 break
             if stop():
                 why = "you asked it to stop"
                 break
     notify(run_summary(hub, summaries, why), f"Roughcut Local: {hub.project.name}")
     return summaries, why
+
+
+def workable(hub):
+    """Whether a next round has something to do: a task that's ready, or a failed one with tries left."""
+    limit = hub.config()["max_attempts"]
+    return bool(hub.ready()) or any(t["status"] == "failed" and t["attempts"] < limit for t in hub.tasks())
 
 
 def run_summary(hub, summaries, why):
@@ -958,14 +1157,15 @@ def run_summary(hub, summaries, why):
 
 def handover_lines(brief, contract, why, failure, stack):
     """What a file left for you must do, as comment lines."""
-    tail = [l for l in (failure or "").strip().splitlines() if l.strip()][-8:]
+    tail = [l for l in failure_digest(failure or "", 1200).splitlines() if l.strip()][:10]
     lines = [HANDOVER, "The models couldn't get this file to pass its tests, so it's yours to finish.", ""]
     lines += brief.splitlines() + [""]
     lines += [f"Its tests: {contract['test_path']}   (run: {stack.test_hint(contract['test_path'])})"]
     lines += [f"Why it's stuck: {why}"]
     if tail:
         lines += ["Last failure:"] + [f"  {l[:160]}" for l in tail]
-    lines += ["", "Once its tests pass, the next round marks it done. Delete this note whenever you like.", HANDOVER_END]
+    lines += ["", "Once its tests pass, the next round marks it done (or answer \"It works\" if it does what you want",
+              "as it is). Delete this note whenever you like.", HANDOVER_END]
     return lines
 
 

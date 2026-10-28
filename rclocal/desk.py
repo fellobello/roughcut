@@ -8,7 +8,9 @@ with no idea of what's running. The desk is the go-between that knows:
   and "build" starts rounds;
 - what's running now. Long work (a brainstorm turn, rounds, reading a project brought in)
   runs on one background thread, one job at a time, so the UI never waits and two rounds
-  never touch the hub at once. Asking it to stop takes effect between rounds;
+  never touch the hub at once. Stop stops it partway (the model call that's running is
+  cut off, and the files it was on go back to todo), or after the round if you'd rather;
+- every answer you gave, so you can change one: the chat keeps which question each was;
 - the app's preview server and each role's model.
 
 Everything it does goes through the hub, Brainstorm and run_rounds, the same code the
@@ -27,7 +29,8 @@ import traceback
 from . import project
 from .brainstorm import Brainstorm
 from .hub_local import HubError, LocalHub
-from .llm import LLMError, OllamaClient
+from .hub_local import HUB_OWNER
+from .llm import Interrupted, LLMError, OllamaClient
 from .protocol import ROLE_JOBS
 from .rounds import run_rounds, run_summary
 from .runner import Runner, free_port
@@ -68,6 +71,7 @@ class Desk:
         self.hub = None
         self.busy = None  # what's running, in words, or None
         self.stop_after_round = False
+        self.stop_now = False
         self.pending = []  # the brainstormer's open questions: [{question, answer}]
         self.ready = False
         self.turns = 0
@@ -138,11 +142,19 @@ class Desk:
     def answer(self, index, reply):
         """Answer one of the brainstormer's questions: "" takes its pick, else an option or your words."""
         item = self.pending[index]
-        if item["answer"] is None:
-            item["answer"] = Brainstorm(self.need_hub()).answer(item["question"], reply)
-            self.post("swarm", item["question"]["text"])
-            self.post("you", item["answer"])
+        if item["answer"] is not None:  # answered already: this changes it
+            return self.answer_question(item["id"], reply or item["question"]["default"])
+        session = Brainstorm(self.need_hub())
+        item["answer"], item["id"] = session.answer(item["question"], reply), session.last_id
+        self.post("swarm", item["question"]["text"])
+        self.post("you", item["answer"], ref=self.ref(item["id"], item["question"]))
         return self.state()
+
+    def ref(self, question_id, question):
+        """What the chat keeps with your answer, so the studio can offer to change it."""
+        options = [o for o in [question.get("default") or question.get("choice"), *question.get("options", [])] if o]
+        return {"id": question_id, "text": question["text"], "options": list(dict.fromkeys(options)),
+                "details": question.get("details") or {}, "pick": question.get("default") or question.get("choice")}
 
     def keep_talking(self):
         """Another brainstorm turn, after the questions are answered (any left take the pick)."""
@@ -158,14 +170,14 @@ class Desk:
     def answer_rest(self, session):
         for item in self.pending:
             if item["answer"] is None:
-                item["answer"] = session.answer(item["question"], "")
+                item["answer"], item["id"] = session.answer(item["question"], ""), session.last_id
 
     def next_turn(self, session):
         hub = self.hub
         cfg = hub.local_config()
         idea = (hub.root / "idea.md").read_text(encoding="utf-8")
         left = max(1, cfg["brainstorm_turns"] - self.turns)
-        reply = asyncio.run(session.turn(Scheduler(self.llm_for(hub), cfg, hub.events), idea, left))
+        reply = asyncio.run(session.turn(Scheduler(self.llm_for(hub), cfg, hub.events, lambda: self.stop_now), idea, left))
         self.turns += 1
         project.set_idea_from_brief(hub, idea)
         project.render(hub)
@@ -191,24 +203,42 @@ class Desk:
                 self.pending = []
             idea = (hub.root / "idea.md").read_text(encoding="utf-8")
             project.set_idea_from_brief(hub, idea)
-            summaries, why = run_rounds(hub, self.llm_for(hub), rounds, stop=lambda: self.stop_after_round)
+            summaries, why = run_rounds(hub, self.llm_for(hub), rounds, stop=lambda: self.stop_after_round,
+                                        cancel=lambda: self.stop_now)
             project.render(hub)
             return "Built " + run_summary(hub, summaries, why)
 
         self.post("you", f"Build ({rounds} round{'s' if rounds != 1 else ''} at most)")
         return self.run("building", work)
 
-    def stop(self):
+    def stop(self, now=True):
+        """Stop what's running: now (the model call running is cut off), or once this round is done."""
+        if not self.busy:
+            return self.state()
         self.stop_after_round = True
-        self.post("desk", "I'll stop after this round finishes.")
+        self.stop_now = self.stop_now or now
+        self.post("desk", "Stopping now." if now else "I'll stop after this round finishes.")
         return self.state()
 
     def answer_question(self, question_id, text=None, keep=False):
-        """Answer a question or guess from the rounds (QUESTIONS.md)."""
+        """Answer a question or guess from the rounds (QUESTIONS.md), or change an answer you gave before."""
         hub = self.need_hub()
+        before = hub.question(question_id)
         result = hub.answer(question_id, text, keep)
-        self.post("swarm", result["question"]["text"])
-        self.post("you", result["question"]["answer"])
+        question = result["question"]
+        if before["status"] == "answered":
+            for item in self.pending:  # a brainstorm question not sent back yet
+                if item.get("id") == question_id:
+                    item["answer"] = question["answer"]
+            if question["task"] == HUB_OWNER:
+                Brainstorm(hub).add(f"I changed my answer: {question['text']} -> {question['answer']}")
+            self.post("you", f"Changed my answer to \u201c{question['text']}\u201d: {question['answer']}",
+                      ref=self.ref(question_id, question))
+            if self.busy == "building":
+                self.post("desk", "The next round plans with it. Press Stop if you want it picked up sooner.")
+        else:
+            self.post("swarm", question["text"])
+            self.post("you", question["answer"], ref=self.ref(question_id, question))
         hub.render()
         project.render(hub)
         return {**self.state(), "reworked": result["reworked"]}
@@ -322,6 +352,7 @@ class Desk:
                 raise HubError(f"wait until it's done: {self.busy}")
             self.busy = what
             self.open_after_job = None
+            self.stop_now = False
 
         def go():
             try:
@@ -331,6 +362,8 @@ class Desk:
                     self.open(self.open_after_job)
                 if message:
                     self.post("desk", message)
+            except Interrupted:
+                self.post("desk", "Stopped. Change anything you like, then Build or keep talking.")
             except Exception as e:  # shown in the chat; the details go to the terminal
                 traceback.print_exc()
                 self.post("desk", f"That didn't work: {e}")
@@ -352,11 +385,14 @@ class Desk:
         path = self.chat_path()
         return json.loads(path.read_text(encoding="utf-8")) if path and path.exists() else []
 
-    def post(self, who, text, questions=None):
+    def post(self, who, text, questions=None, ref=None):
         if not self.hub:
             return
         messages = self.chat()
-        messages.append({"who": who, "text": text, "questions": questions or [], "ts": time.time()})
+        message = {"who": who, "text": text, "questions": questions or [], "ts": time.time()}
+        if ref:
+            message["ref"] = ref
+        messages.append(message)
         self.hub._write_text(self.chat_path(), json.dumps(messages[-200:], indent=2) + "\n")
 
     def stage(self, snapshot=None):
@@ -377,7 +413,7 @@ class Desk:
             "project": {"path": str(hub.project), "name": project.load_brief(hub)["name"] if project.load_brief(hub)
                         else hub.project.name, "stack": hub.stack.name, "round": hub.config()["round"]} if hub else None,
             "busy": self.busy,
-            "stopping": self.stop_after_round and bool(self.busy),
+            "stopping": ("now" if self.stop_now else "after this round") if self.stop_after_round and self.busy else None,
             "chat": self.chat()[-60:],
             "pending": [{"index": i, **item} for i, item in enumerate(self.pending)],
             "ready": self.ready,

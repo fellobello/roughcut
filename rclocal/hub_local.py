@@ -40,6 +40,7 @@ DEFAULT_CONFIG = {
         "reviewer": "qwen3:8b",
         "reporter": "qwen3:8b",
     },
+    # Thinking is off: on the reviewer it took 1.5 to 4 minutes a call for the same verdict.
     "think": {"brainstormer": False, "planner": False, "user": False, "reviewer": False, "reporter": False},
     "max_parallel_calls": 2,  # model calls in flight at once, across all models
     "model_slots": {},  # per-model limit, e.g. {"qwen3:8b": 1}; default 1 each
@@ -122,15 +123,18 @@ class LocalHub(Hub):
 
     # Tasks without worktrees
 
-    def start_tasks(self, limit=None):
-        """Mark up to `limit` ready tasks in progress. Each owns one file, so there is nothing to check out."""
+    def start_tasks(self, limit=None, first=()):
+        """Mark up to `limit` ready tasks in progress, the ids in `first` before the rest.
+
+        Each owns one file, so there is nothing to check out.
+        """
         with self.locked():
             errors = self.check()
             if errors:
                 raise HubError("the task graph is invalid: " + "; ".join(errors))
             current = self.config()["round"]
             started = []
-            for task in self.ready()[:limit]:
+            for task in sorted(self.ready(), key=lambda t: t["id"] not in first)[:limit]:
                 task["attempts"] += 1
                 task.update(status="in_progress", round=current)
                 self._save_task(task)
@@ -202,11 +206,12 @@ class LocalHub(Hub):
             task["notes"].append(text)
             self._save_task(task)
 
-    def ask(self, owner, text, critical=False, choice=None, why="", options=(), affects=()):
+    def ask(self, owner, text, critical=False, choice=None, why="", options=(), affects=(), meta=None):
         """Hub.ask, where options may be {label, detail} pairs (protocol.OPTION) as well as plain labels.
 
         Labels are what's stored and shown; details go in the question's "details", for the
-        studio to show on hover.
+        studio to show on hover. `meta` is kept on the question for whoever acts on the
+        answer (an example to confirm keeps its file, call and value there).
         """
         labels, details = [], {}
         for option in options:
@@ -219,9 +224,11 @@ class LocalHub(Hub):
             if label and label not in labels:
                 labels.append(label)
         question = super().ask(owner, text, critical, choice, why, labels, affects)
-        if details:
+        if details or meta:
             with self.locked():
-                question["details"] = details
+                question.update(meta or {})
+                if details:
+                    question["details"] = details
                 self._write(self.questions_dir / f"{question['id']}.json", question)
         return question
 
@@ -234,6 +241,7 @@ class LocalHub(Hub):
         with self.locked():
             question = self.question(question_id)
             question["answered_round"] = self.config()["round"]
+            question["acted"] = False  # a changed answer is acted on again
             self._write(self.questions_dir / f"{question_id}.json", question)
         return result
 

@@ -17,11 +17,13 @@ from __future__ import annotations
 
 import ast
 import json
+import posixpath
 import re
 import subprocess
 from pathlib import Path, PurePosixPath
 
 KIT = Path(__file__).with_name("kit.css")
+PLACEHOLDER = "ROUGHCUT: PLACEHOLDER"  # first line of a stand-in file the page runs on until the real one is built
 
 # Python: modules and calls an app or its tests never need.
 PY_BANNED_MODULES = {
@@ -168,6 +170,10 @@ class Stack:
     def guard(self, code):
         raise NotImplementedError
 
+    def import_from(self, path, other):
+        """How the file at `path` imports `other`, where that differs from import_hint. None: it doesn't."""
+        return None
+
 
 class Python(Stack):
     name, lang, example = "python", "python", "app/geo.py"
@@ -307,6 +313,27 @@ class Web(Stack):
 
     def test_hint(self, test_path):
         return f"node --test {test_path}"
+
+    def import_from(self, path, other):
+        """How the file at `path` imports `other`: a path relative to it, like './math.js'."""
+        rel = posixpath.relpath(other, posixpath.dirname(path))
+        return rel if rel.startswith("../") else "./" + rel
+
+    def placeholder(self, contract):
+        """A stand-in with every export, each returning its first example, so the page can run before the file is built."""
+        lines = [self.comment([PLACEHOLDER, "This file isn't built yet. Each export returns its contract's first example,",
+                               "so the page works for trying out. Its builder replaces all of it."])]
+        for e in contract["exports"]:
+            name = e["name"].split(".")[0]
+            example = next(iter(e.get("examples") or []), None)
+            if e["signature"].lstrip().startswith("class"):
+                lines.append(f"export class {name} {{}}")
+            elif e["signature"].lstrip().startswith("function"):
+                body = f"return {example['returns']};" if example else f"throw new Error('{name} isn\\'t built yet');"
+                lines.append(f"export function {name}() {{ {body} }}")
+            else:
+                lines.append(f"export const {name} = {example['returns'] if example else 'null'};")
+        return "\n".join(lines) + "\n"
 
     def example_ok(self, call, returns):
         """Whether one example is valid code: a call and a value."""
