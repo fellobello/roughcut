@@ -145,6 +145,33 @@ h1 { letter-spacing: .02em; } h2, .msg .who, th { letter-spacing: .14em; }
 #talk.on { display: flex; flex-direction: column; gap: 14px; height: calc(100dvh - 150px); min-height: 360px; }
 #talk > .card:first-child { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 #talk .chat { flex: 1; max-height: none; }
+/* Files: a Finder-like tree under the folder picker. */
+.files-head { display: flex; align-items: center; gap: 8px; }
+.files-head h2 { margin: 0; flex: 1; }
+.icon.small { width: 26px; height: 26px; font-size: 13px; }
+.tree { min-height: 240px; max-height: 48vh; overflow: auto; font-size: 13px; margin-top: 8px; padding: 4px; border-radius: var(--radius-sm); background: var(--panel-2); box-shadow: var(--inset); }
+.node { display: flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 8px; cursor: pointer; white-space: nowrap; border: 0; background: none; width: 100%; text-align: left; font: inherit; color: var(--ink-2); }
+.node:hover { background: var(--panel); color: var(--ink); }
+.node.on { background: var(--accent-soft); color: var(--accent); }
+.node .caret { width: 10px; color: var(--ink-3); font-size: 10px; flex: none; }
+.node svg { width: 15px; height: 15px; flex: none; }
+.node .name { overflow: hidden; text-overflow: ellipsis; }
+.node .left { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); flex: none; margin-left: auto; }
+
+/* Editor: line numbers, the code, and beside it the file's contract and its test run. */
+.edhead { margin-bottom: 12px; }
+.edhead .path { font-family: var(--mono); font-size: 13px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40%; }
+.edgrid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 14px; }
+.code { display: flex; height: calc(100dvh - 210px); min-height: 320px; background: var(--panel-2); border-radius: var(--radius-sm); box-shadow: var(--inset); overflow: hidden; }
+.gutter { margin: 0; padding: 14px 10px 14px 14px; text-align: right; color: var(--ink-3); font: 12.5px/1.6 var(--mono); user-select: none; overflow: hidden; min-width: 48px; }
+#edText { flex: 1; border: 0; background: transparent; box-shadow: none; resize: none; font: 12.5px/1.6 var(--mono); padding: 14px 14px 14px 4px; white-space: pre; overflow: auto; border-radius: 0; tab-size: 2; min-height: 0; }
+#edText:focus { box-shadow: none; }
+.edside { display: grid; gap: 12px; align-content: start; }
+.edside .card { margin: 0; padding: 16px 18px; }
+.edside pre { margin: 0; white-space: pre-wrap; font: 12px/1.5 var(--mono); color: var(--ink-2); max-height: 38vh; overflow: auto; }
+.pass { color: var(--ok); } .fail { color: var(--bad); }
+@media (max-width: 1100px) { .edgrid { grid-template-columns: minmax(0, 1fr); } .code { height: 52dvh; } }
+
 @media (max-width: 900px) {
   .layout, body.no-left .layout, body.no-right .layout { grid-template-columns: minmax(0, 1fr); }
   #left, main, #right { grid-column: 1; }
@@ -179,11 +206,16 @@ h1 { letter-spacing: .02em; } h2, .msg .who, th { letter-spacing: .14em; }
     <button class="btn" id="openBtn">Open it here</button>
     <span class="muted" style="font-size:12px">Folders from elsewhere are copied first, so yours stays as it is.</span>
   </section>
+  <section>
+    <div class="files-head"><h2>Files</h2><button class="icon small" id="treeBtn" title="Refresh the files" aria-label="Refresh the files">↻</button></div>
+    <div class="tree" id="tree"><span class="muted">Open a project to see its files.</span></div>
+  </section>
   <div class="error" id="error"></div>
 </aside>
 <main>
   <div class="tabs" id="tabs">
     <button class="tab on" data-tab="talk">Talk<span class="n" id="qn" hidden></span></button>
+    <button class="tab" data-tab="editor">Editor</button>
     <button class="tab" data-tab="build">Progress</button>
     <button class="tab" data-tab="app">App</button>
     <button class="tab" data-tab="models">Models</button>
@@ -199,6 +231,21 @@ h1 { letter-spacing: .02em; } h2, .msg .who, th { letter-spacing: .14em; }
         <span style="flex:1"></span>
         <label class="muted">Rounds <input class="input" id="rounds" type="number" min="1" max="10" placeholder="auto" style="width:70px"></label>
         <button class="btn primary" id="buildBtn">Build</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel" id="editor">
+    <div class="row edhead">
+      <span class="path" id="edPath">No file open: pick one in Files</span><span class="chip" id="edLang" hidden></span>
+      <span class="muted" id="edState"></span><span style="flex:1"></span><span class="muted mono" id="edPos"></span>
+      <button class="btn" id="edTest" hidden>Run its tests</button><button class="btn primary" id="edSave" disabled title="⌘S">Save</button>
+    </div>
+    <div class="edgrid">
+      <div class="code"><pre class="gutter" id="edLines">1</pre><textarea id="edText" spellcheck="false" wrap="off" disabled></textarea></div>
+      <div class="edside">
+        <div class="card" id="edContract" hidden><h2>What it must do</h2><pre id="edContractText"></pre></div>
+        <div class="card" id="edOut" hidden><h2 id="edOutTitle">Its tests</h2><pre id="edOutText"></pre></div>
       </div>
     </div>
   </section>
@@ -427,6 +474,94 @@ async function loadModels() {
   modelsLoaded = true;
 }
 
+// Files and the editor
+
+const FOLDER = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 6.5A2.5 2.5 0 0 1 5.5 4h4l2 2.5h7A2.5 2.5 0 0 1 21 9v8.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z" opacity=".75"/></svg>';
+const FILE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4"/></svg>';
+let files = [], openDirs = new Set(["app"]), treeFor = null, wasBusy = null, ed = { path: null, saved: "" };
+
+async function loadTree() {
+  if (!state || !state.project) { $("tree").innerHTML = '<span class="muted">Open a project to see its files.</span>'; files = []; return; }
+  const r = await fetch("api/files");
+  files = r.ok ? (await r.json()).files : [];
+  drawn.tree = ""; drawTree(state);
+}
+function drawTree(s) {
+  const left = new Set(((s.status && s.status.tasks) || []).filter(t => t.status === "failed" && t.kind === "build").map(t => t.module));
+  if (!changed("tree", [files.length, [...openDirs], ed.path, [...left]])) return;
+  const kids = {};
+  files.forEach(f => { const parent = f.path.includes("/") ? f.path.slice(0, f.path.lastIndexOf("/")) : ""; (kids[parent] = kids[parent] || []).push(f); });
+  const rows = [];
+  const walk = (dir, depth) => (kids[dir] || []).forEach(f => {
+    const name = f.path.split("/").pop(), open = openDirs.has(f.path);
+    rows.push(`<button class="node ${f.path === ed.path ? "on" : ""}" style="padding-left:${8 + depth * 14}px" data-path="${esc(f.path)}" data-dir="${f.dir ? 1 : ""}"
+      title="${esc(f.path)}${left.has(f.path) ? " · left for you" : ""}"><span class="caret">${f.dir ? (open ? "▾" : "▸") : ""}</span>${f.dir ? FOLDER : FILE}
+      <span class="name">${esc(name)}</span>${left.has(f.path) ? '<span class="left"></span>' : ""}</button>`);
+    if (f.dir && open) walk(f.path, depth + 1);
+  });
+  walk("", 0);
+  $("tree").innerHTML = rows.join("") || '<span class="muted">No files yet.</span>';
+  $("tree").querySelectorAll(".node").forEach(n => n.onclick = () => {
+    if (n.dataset.dir) { openDirs.has(n.dataset.path) ? openDirs.delete(n.dataset.path) : openDirs.add(n.dataset.path); drawTree(state); }
+    else openFile(n.dataset.path);
+  });
+}
+$("treeBtn").onclick = loadTree;
+
+const dirty = () => ed.path && $("edText").value !== ed.saved;
+function closeFile() {
+  ed = { path: null, saved: "" };
+  $("edText").value = ""; $("edText").disabled = true; $("edPath").textContent = "No file open: pick one in Files";
+  ["edLang", "edContract", "edTest", "edOut"].forEach(id => $(id).hidden = true);
+  edUpdate();
+}
+async function openFile(path) {
+  if (dirty() && !confirm(`Discard your changes to ${ed.path}?`)) return;
+  const r = await fetch("api/file?path=" + encodeURIComponent(path));
+  const f = await r.json();
+  if (!r.ok) { $("error").textContent = f.error; return; }
+  ed = { path: f.path, saved: f.text, readOnly: f.read_only };
+  const box = $("edText");
+  box.value = f.text; box.disabled = false; box.readOnly = f.read_only; box.scrollTop = 0;
+  $("edPath").textContent = f.path; $("edLang").hidden = false; $("edLang").textContent = f.language;
+  $("edContract").hidden = !f.contract; $("edContractText").textContent = f.contract || "";
+  $("edTest").hidden = !f.test_path; $("edOut").hidden = true;
+  edUpdate(); drawn.tree = ""; drawTree(state); showTab("editor");
+}
+function edUpdate() {
+  const box = $("edText"), lines = box.value.split("\n").length;
+  $("edLines").textContent = Array.from({ length: lines }, (_, i) => i + 1).join("\n");
+  $("edLines").scrollTop = box.scrollTop;
+  $("edState").textContent = ed.readOnly ? "read only" : dirty() ? "● unsaved" : ed.path ? "saved" : "";
+  $("edSave").disabled = !dirty() || ed.readOnly;
+  const before = box.value.slice(0, box.selectionStart).split("\n");
+  $("edPos").textContent = ed.path ? `Ln ${before.length}, Col ${before[before.length - 1].length + 1} · ${lines} lines` : "";
+}
+async function edSave() {
+  if (!dirty() || ed.readOnly) return;
+  const text = $("edText").value;
+  await post("save", { path: ed.path, text });
+  ed.saved = text; edUpdate(); loadTree();
+}
+$("edText").addEventListener("input", edUpdate);
+$("edText").addEventListener("scroll", () => { $("edLines").scrollTop = $("edText").scrollTop; });
+["click", "keyup"].forEach(ev => $("edText").addEventListener(ev, edUpdate));
+$("edText").addEventListener("keydown", e => {
+  if ((e.metaKey || e.ctrlKey) && e.key === "s") { e.preventDefault(); edSave(); }
+  if (e.key === "Tab" && !e.shiftKey) { e.preventDefault(); document.execCommand("insertText", false, "  "); }
+});
+$("edSave").onclick = edSave;
+$("edTest").onclick = async () => {
+  if (dirty()) await edSave();
+  $("edOut").hidden = false; $("edOutTitle").textContent = "Its tests: running…"; $("edOutText").textContent = "";
+  try {
+    const r = await post("run-tests", { path: ed.path });
+    $("edOutTitle").innerHTML = `Its tests: <span class="${r.passed ? "pass" : "fail"}">${r.passed ? "pass" : "fail"}</span>`;
+    $("edOutText").textContent = r.output;
+  } catch (e) { $("edOutTitle").textContent = "Its tests"; $("edOutText").textContent = String(e.message || e); }
+};
+addEventListener("beforeunload", e => { if (dirty()) { e.preventDefault(); e.returnValue = ""; } });
+
 async function refresh() {
   let s;
   try { s = await (await fetch("api/state")).json(); }
@@ -435,6 +570,11 @@ async function refresh() {
   try {
     $("where").textContent = s.project ? `${s.project.name} · ${s.project.path}` : "No project open";
     chips(s); projectList(s); talk(s); asking(s); buildPanel(s); appPanel(s); cycle(s);
+    const where = s.project && s.project.path;
+    if (where !== treeFor && treeFor !== null && ed.path) closeFile();  // another project: its files aren't this one's
+    if (where !== treeFor || (wasBusy && !s.busy)) { treeFor = where; loadTree(); }  // new project, or a build just ended
+    wasBusy = s.busy;
+    drawTree(s);
   } catch (e) { $("where").textContent = "Display error: " + e; console.error(e); }
 }
 refresh(); setInterval(refresh, 2000);

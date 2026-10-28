@@ -29,13 +29,18 @@ Or do all of it from one page in your browser:
 ```
 
 The studio (http://127.0.0.1:8770) has your projects on the left (open one, start a new
-one, or bring in existing code from a folder or GitHub repo) and four tabs:
+one, or bring in existing code from a folder or GitHub repo), the project's files below that, and five tabs:
 
 - **Talk**: chat with the brainstormer. Its questions come up one at a time in their own box,
   each answer 2 or 3 words, with what it means when you hover over it; ★ marks its pick.
   Type your own answer instead, or press Keep talking to take its picks. Build starts the rounds.
   Once it has built, the guesses it made and the files it left for you come up in the chat
   too, one at a time: the swarm asks on the left, and you answer in the box on the right.
+- **Editor**: open any file from **Files** (the tree under the folder picker; files left for
+  you have an orange dot). It shows the language, line numbers and whether it's saved; ⌘S
+  saves. Beside the code: what the file must do (its contract and examples), and **Run its
+  tests**, which runs them in the box and shows pass or fail. Only files inside the project
+  can be opened or saved, and `.hub/` and `.git/` are read only.
 - **Progress**: the round as it runs: tasks, model calls, speed, what happened. Stop after this round.
 - **App**: the app running inside the page, and every screenshot from the rounds and test users.
 - **Models**: whether Ollama answers, what's installed, and a model per role (changes are

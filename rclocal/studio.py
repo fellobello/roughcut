@@ -63,6 +63,8 @@ def make_server(desk, port=8770, host="127.0.0.1"):
         "question": lambda b: desk.answer_question(b["id"], b.get("text"), bool(b.get("keep"))),
         "app": lambda b: desk.app_url(),
         "model": lambda b: desk.set_model(b["role"], b["model"]),
+        "save": lambda b: desk.write_file(b["path"], b["text"]),
+        "run-tests": lambda b: desk.test_file(b["path"]),
     }
 
     class Handler(BaseHTTPRequestHandler):
@@ -92,6 +94,16 @@ def make_server(desk, port=8770, host="127.0.0.1"):
                 self.send(200, full_state(desk))
             elif path == "/api/models":
                 self.send(200, desk.models())
+            elif path in ("/api/files", "/api/file"):
+                from urllib.parse import parse_qs, urlparse
+
+                try:
+                    if path == "/api/files":
+                        self.send(200, desk.files())
+                    else:
+                        self.send(200, desk.read_file(parse_qs(urlparse(self.path).query).get("path", [""])[0]))
+                except HubError as e:
+                    self.send(400, {"error": str(e)})
             elif path.startswith("/screens/") and desk.hub:
                 name = path.rsplit("/", 1)[1]
                 file = desk.hub.root / "screens" / name

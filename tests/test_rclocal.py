@@ -930,6 +930,30 @@ class DeskTest(unittest.TestCase):
                 self.desk.say("and another thing")
         self.settle()
 
+    def test_the_file_manager_stays_inside_the_project(self):
+        self.desk.new("something for my book club")
+        self.settle()
+        root = self.desk.hub.project
+        (root / "app").mkdir(exist_ok=True)
+        (root / "app/votes.js").write_text("export const x = 1;\n")
+        listed = {f["path"]: f["dir"] for f in self.desk.files()["files"]}
+        self.assertTrue(listed["app"])
+        self.assertIn("app/votes.js", listed)
+        self.assertFalse(any(p == ".git" or p.startswith(".git/") for p in listed))
+        opened = self.desk.read_file("app/votes.js")
+        self.assertEqual((opened["language"], opened["read_only"]), ("JavaScript", False))
+        self.desk.write_file("app/votes.js", "export const x = 2;\n")
+        self.assertIn("2", (root / "app/votes.js").read_text())
+        self.assertTrue(self.desk.read_file(".hub/idea.md")["read_only"])
+        for bad in ("../outside.txt", "/etc/hosts", "app/../../x"):
+            with self.assertRaises(HubError, msg=bad):
+                self.desk.write_file(bad, "no")
+        for blocked in (".hub/idea.md", ".git/config"):
+            with self.assertRaises(HubError, msg=blocked):
+                self.desk.write_file(blocked, "no")
+        with self.assertRaises(HubError):
+            self.desk.read_file("../../.zshrc")
+
     def test_models_can_be_changed_per_role(self):
         self.desk.new("something for my book club")
         self.settle()

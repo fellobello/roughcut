@@ -33,6 +33,17 @@ from .rounds import run_rounds, run_summary
 from .runner import Runner, free_port
 from .scheduler import Scheduler
 
+# The file manager and editor: what they skip, what they may change, and how big a file they open.
+HIDDEN = {".git", "node_modules", "__pycache__", ".probe.html", ".DS_Store", ".worktrees"}
+READ_ONLY = {".git", ".hub"}  # the hub is written by rounds only; git by git
+MAX_FILES = 2000
+MAX_OPEN = 1_000_000  # bytes
+LANGUAGES = {
+    ".js": "JavaScript", ".mjs": "JavaScript", ".ts": "TypeScript", ".py": "Python", ".html": "HTML",
+    ".css": "CSS", ".json": "JSON", ".md": "Markdown", ".txt": "Text", ".jsonl": "JSON Lines",
+    ".sh": "Shell", ".yml": "YAML", ".yaml": "YAML", ".toml": "TOML", ".svg": "SVG", ".csv": "CSV",
+}
+
 BUILD_WORDS = ("build", "build it", "go", "start", "start building")
 # The cycle, in order: (key, name, what happens). The studio lists these and lights up the current one.
 STAGES = [
@@ -219,6 +230,72 @@ class Desk:
         if self.app:
             self.app[2].stop(self.app[1])
             self.app = None
+
+    # Files: the open project's folder, for the file manager and the editor
+
+    def project_path(self, path):
+        """A path inside the open project, or an error. Nothing outside it can be read or written."""
+        hub = self.need_hub()
+        root = hub.project.resolve()
+        target = (root / path).resolve()
+        if target != root and root not in target.parents:
+            raise HubError("that's outside the project")
+        return root, target
+
+    def files(self):
+        """Every file and folder in the project, for the tree (hidden ones left out)."""
+        root, _ = self.project_path(".")
+        entries = []
+        for item in sorted(root.rglob("*"), key=lambda p: (str(p.parent).lower(), p.is_file(), p.name.lower())):
+            rel = item.relative_to(root)
+            if any(part in HIDDEN for part in rel.parts):
+                continue
+            entries.append({"path": rel.as_posix(), "dir": item.is_dir(), "size": item.stat().st_size if item.is_file() else 0})
+            if len(entries) >= MAX_FILES:
+                break
+        return {"root": root.name, "files": entries}
+
+    def read_file(self, path):
+        """A file's text, with its language and, for a file with a contract, the contract and its tests."""
+        hub = self.need_hub()
+        root, target = self.project_path(path)
+        if not target.is_file():
+            raise HubError(f"no file {path}")
+        if target.stat().st_size > MAX_OPEN:
+            raise HubError("that file is too big to open here")
+        try:
+            text = target.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            raise HubError("that isn't a text file") from None
+        rel = target.relative_to(root).as_posix()
+        contract = hub.contracts.get(rel) if hub.contracts.exists(rel) else None
+        return {
+            "path": rel, "text": text, "language": LANGUAGES.get(target.suffix.lower(), "Text"),
+            "read_only": rel.split("/")[0] in READ_ONLY,
+            "contract": hub.contracts.describe(contract) if contract else None,
+            "test_path": contract["test_path"] if contract and (root / contract["test_path"]).exists() else None,
+        }
+
+    def write_file(self, path, text):
+        """Save a file you edited. Rounds pick up a file left for you once its tests pass."""
+        root, target = self.project_path(path)
+        rel = target.relative_to(root).as_posix()
+        if rel.split("/")[0] in READ_ONLY or rel in ("", "."):
+            raise HubError(f"{rel or 'that'} can't be edited here")
+        if target.is_dir():
+            raise HubError("that's a folder")
+        self.hub._write_text(target, text)
+        return {"saved": rel, "bytes": len(text.encode("utf-8"))}
+
+    def test_file(self, path):
+        """Run a file's tests in the box, the same way a round does. Returns whether they pass, and the output."""
+        hub = self.need_hub()
+        info = self.read_file(path)
+        if not info["test_path"]:
+            raise HubError(f"{path} has no tests")
+        runner = Runner(hub.project, hub.stack, hub.local_config()["test_timeout"], hub.local_config()["sandbox"])
+        passed, output = asyncio.run(runner.run(info["test_path"]))
+        return {"passed": passed, "output": output[-3000:], "test_path": info["test_path"]}
 
     def models(self):
         """Each role's model and job, what Ollama has installed, and whether it answers."""
