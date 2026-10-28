@@ -30,7 +30,7 @@ from .llm import LLMError
 from .notify import awake, notify
 from .runner import Runner
 from .scheduler import Scheduler
-from .stacks import filter_styles
+from .stacks import example_cases, filter_styles
 from .users import TestUsers
 
 OPEN_FENCE = re.compile(r"^\s*```[a-zA-Z]*[ \t]*\n")
@@ -56,6 +56,8 @@ DESIGN_TASK = "page-design"
 # On the web stack the page's own script is the UI; a logic file by one of these names would need the DOM.
 UI_NAMES = {"ui", "dom", "view", "views", "page", "index", "main", "app", "display", "render", "renderer", "interface", "screen"}
 VERIFY_PARALLEL = 3
+REPLAN = "Plan it again"  # the answer recorded when a contract can't work, so the next plan revises it
+MAX_RULES = 20
 
 
 def clean_code(text):
@@ -186,16 +188,42 @@ class Round:
             self.events.emit("note", text="unfinished tasks and no new answers, so the plan stays as it is")
             return None
         reply = await agents.plan(
-            self.sched, self.stack, idea, hub.memory.conventions(), self.contracts_md(), answers, first
+            self.sched, self.stack, idea, hub.memory.conventions(), self.contracts_md(), answers, first, self.rules()
         )
+        bad, total = self.bad_examples(reply["files"])
+        if total and bad * 2 > total:  # mostly junk: one more try, told why
+            self.events.emit("note", text=f"{bad} of the plan's {total} examples weren't values; asking again")
+            fix = [{"text": "Your last plan's examples were rejected", "answer": "Each example's returns must be a "
+                    f"value in {self.stack.lang_name}, like 15 or [58, 57], never a sentence or a file name. Plan again."}]
+            reply = await agents.plan(
+                self.sched, self.stack, idea, hub.memory.conventions(), self.contracts_md(), answers + fix, first, self.rules()
+            )
         skipped = self.apply_plan(reply)
         if first and not hub.contracts.all():  # nothing usable: one more try, told why
             why = "; ".join(skipped) or "the plan had no files"
             self.events.emit("note", text=f"the plan had no usable files ({why}); asking again")
             retry = [{"text": "Your last plan was rejected", "answer": f"{why}. Plan again."}]
-            reply = await agents.plan(self.sched, self.stack, idea, hub.memory.conventions(), "", answers + retry, first)
+            reply = await agents.plan(self.sched, self.stack, idea, hub.memory.conventions(), "", answers + retry, first,
+                                      self.rules())
             self.apply_plan(reply)
         return reply["complete"]
+
+    def bad_examples(self, file_plans):
+        """How many of a plan's examples aren't valid code, out of how many."""
+        examples = [x for f in file_plans for e in f["exports"] for x in e.get("examples", [])]
+        bad = sum(1 for x in examples if not self.stack.example_ok(x["call"], x["returns"]))
+        return bad, len(examples)
+
+    def rules(self):
+        """Your settled answers, as rules every role follows. Not just this round's: all of them."""
+        lines = []
+        for q in self.hub.questions():
+            if q["task"] != HUB_OWNER or q["status"] != "answered" or q["answer"] == REPLAN:
+                continue
+            if q["text"].startswith("What should change next?"):
+                continue  # a change request, handled by the plan it was asked for
+            lines.append(f"- {q['text']} -> {q['answer']}")
+        return "\n".join(lines[-MAX_RULES:])
 
     def contracts_md(self):
         return "\n\n".join(self.hub.contracts.describe(c) for c in self.hub.contracts.all())
@@ -319,7 +347,9 @@ class Round:
 
     def redo(self, task_id, reason):
         task = self.hub.task(task_id)
-        if task["status"] in ("done", "failed", "blocked"):
+        if task["status"] == "failed":
+            self.hub.restart(task_id, reason)  # a new contract is a new job: fresh tries
+        elif task["status"] in ("done", "blocked"):
             self.hub.retry(task_id, reason)
         elif task["status"] == "todo":
             self.hub.note(task_id, reason)
@@ -378,7 +408,7 @@ class Round:
         problem = ""
         for _ in range(2):
             text, cut = await agents.write_tests(
-                self.sched, self.stack, brief, self.hub.memory.conventions(), contract["test_path"], notes
+                self.sched, self.stack, brief, self.hub.memory.conventions(), contract["test_path"], notes, self.rules()
             )
             code = self.stack.repair_test(clean_code(text))
             if cut:
@@ -406,7 +436,12 @@ class Round:
         Returns (code, how many examples were added). Examples that aren't valid code are left
         out, with a note, rather than breaking a test file that works.
         """
-        extra = self.stack.example_tests(contract)
+        cases = example_cases(contract)
+        good = [c for c in cases if self.stack.example_ok(*c)]
+        if len(good) < len(cases):
+            self.events.emit("note", text=f"{contract['path']}: left out {len(cases) - len(good)} contract example(s) "
+                                          "that aren't valid code")
+        extra = self.stack.example_tests(contract, good)
         if not extra:
             return code, 0
         joined = code.rstrip() + "\n\n" + extra
@@ -432,7 +467,7 @@ class Round:
             notes.append(f"{path} already has a version from an earlier attempt; read it before rewriting it.")
         messages = agents.builder_conversation(
             stack, hub.contracts.brief(path), path, test_path, hub.memory.conventions(), hub.memory.lessons(),
-            notes, readable, steps,
+            notes, readable, steps, self.rules(),
         )
         code = target.read_text(encoding="utf-8") if target.exists() else ""
         passed, failure, writes = False, "", 0
@@ -513,7 +548,7 @@ class Round:
         hub = self.hub
         test_file = hub.project / contract["test_path"]
         test_code = test_file.read_text(encoding="utf-8") if test_file.exists() else ""
-        verdict = await agents.review(self.sched, hub.contracts.brief(contract["path"]), test_code, code, failure)
+        verdict = await agents.review(self.sched, hub.contracts.brief(contract["path"]), test_code, code, failure, self.rules())
         reason = verdict["reason"].strip() or "no reason given"
         self.events.emit("note", text=f"review of {contract['path']}: blame {verdict['blame']}: {reason}")
         max_attempts = hub.config()["max_attempts"]
@@ -533,6 +568,11 @@ class Round:
                     return split
             if task["attempts"] < max_attempts:
                 return "failed", f"still failing: {reason}", lambda: hub.retry(task["id"], f"review: {reason}", use_attempt=True)
+        if verdict["blame"] == "contract":  # the next plan revises it, and then the file gets fresh tries
+            ask = hub.ask(HUB_OWNER, f"{contract['path']}'s contract can't work as written: {reason}", critical=True,
+                          choice=REPLAN)
+            hub.answer(ask["id"], REPLAN)
+            self.events.emit("note", text=f"{contract['path']}: its contract goes back to the planner: {reason}")
         what = "its contract can't work as written" if verdict["blame"] == "contract" else "it keeps failing its tests"
         return (*self.hand_over(task, contract, code, f"{what}: {reason}", failure), None)
 
@@ -554,7 +594,8 @@ class Round:
         folder = posixpath.splitext(path)[0] + "_parts"  # app/board.js -> app/board_parts (a folder named like
         # the file itself would hide it from Python's imports)
         try:
-            reply = await agents.split(self.sched, self.stack, contracts.brief(path), folder, test_code, code, failure)
+            reply = await agents.split(self.sched, self.stack, contracts.brief(path), folder, test_code, code, failure,
+                                       self.rules())
         except LLMError as e:
             self.events.emit("note", text=f"couldn't split {path}: {e}")
             return None

@@ -446,6 +446,34 @@ class RoundTest(HubCase):
         self.assertEqual(set(self.statuses().values()), {"done"})
         self.assertEqual(failure_signature("✖ to_celsius rounds (1.2ms)\nnoise\n✖ freezing"), "freezing; to_celsius rounds")
 
+    def test_your_answers_reach_every_role_as_rules(self):
+        q = self.hub.ask("hub", "Tip rounding?", critical=True, choice="Exact")
+        self.hub.answer(q["id"], "Round to the nearest dollar")
+        change = self.hub.ask("hub", "What should change next?", critical=True, choice="(in your words)")
+        self.hub.answer(change["id"], "add a dark mode")
+        llm = FakeLLM(py_script({"app/convert.py": [CONVERT_GOOD], "app/report.py": [REPORT_GOOD]}))
+        self.run_round(None, llm=llm)
+        for role in ("Planner:", "Tester:", "Builder:"):
+            prompts = [c["user"] if role != "Builder:" else c["messages"][1]["content"] for c in llm.calls
+                       if c["system"].startswith(role)]
+            self.assertTrue(prompts, role)
+            self.assertIn("Tip rounding? -> Round to the nearest dollar", prompts[0], role)
+            self.assertNotIn("add a dark mode", prompts[0].split("New answers")[0], role)
+
+    def test_a_contract_that_cannot_work_goes_back_to_the_planner(self):
+        from rclocal.rounds import REPLAN
+
+        self.run_round(py_script({"app/convert.py": [CONVERT_BAD], "app/report.py": [REPORT_GOOD]}, verdict="contract"))
+        replan = [q for q in self.hub.questions() if q["answer"] == REPLAN]
+        self.assertEqual(len(replan), 1)
+        self.assertIn("app/convert.py's contract can't work", replan[0]["text"])
+        self.assertEqual(self.hub.task("app-convert-py")["status"], "failed")
+        rnd = Round(self.hub, FakeLLM(None))
+        rnd.number = 1
+        rnd.redo("app-convert-py", "contract v2")  # a new contract: fresh tries
+        self.assertEqual((self.hub.task("app-convert-py")["status"], self.hub.task("app-convert-py")["attempts"]), ("todo", 0))
+        self.assertNotIn("contract can't work", rnd.rules())
+
     def test_hand_over_notes_do_not_pile_up(self):
         from rclocal.rounds import strip_handover
 
@@ -566,6 +594,31 @@ class WebRoundTest(HubCase):
         summary = self.tip_round([{"call": "tipFor(100, 15", "returns": "15"}, {"call": "new Tip()", "returns": "{}"}])
         self.assertTrue(summary["tests_passed"])
         self.assertNotIn("__contract", (self.project / "tests/app_tip.test.mjs").read_text())
+
+    def test_bad_examples_are_left_out_one_by_one(self):
+        summary = self.tip_round([{"call": "tipFor(100, 15)", "returns": "15"},
+                                  {"call": "tipFor(50, 10)", "returns": "path: app/tip.js, line: 2"}])
+        self.assertTrue(summary["tests_passed"])
+        tests = (self.project / "tests/app_tip.test.mjs").read_text()
+        self.assertIn("__contract.tipFor(100, 15), 15", tests)
+        self.assertNotIn("path: app", tests)
+
+    def test_a_plan_of_junk_examples_is_asked_for_again(self):
+        junk = {**TIP, "exports": [export("tipFor", "function tipFor(bill, percent) -> number",
+                                          examples=[{"call": "tipFor(100, 15)", "returns": "path: app/tip.js, line: 1"}])]}
+        good = {**TIP, "exports": [export("tipFor", "function tipFor(bill, percent) -> number",
+                                          examples=[{"call": "tipFor(100, 15)", "returns": "15"}])]}
+        script = Script({"app/tip.js": [TIP_GOOD]}, WEB_TESTS, plan_of([junk]))
+        plans = iter([plan_of([junk]), plan_of([good])])
+
+        def respond(role, model, system, user, schema):
+            return next(plans) if role == "planner" else script(role, model, system, user, schema)
+
+        rnd = Round(self.hub, FakeLLM(respond))
+        rnd.number = 0
+        asyncio.run(rnd.plan("tips"))
+        examples = self.hub.contracts.get("app/tip.js")["exports"][0]["examples"]
+        self.assertEqual(examples, [{"call": "tipFor(100, 15)", "returns": "15"}])
 
     def test_the_page_may_only_import_real_exports(self):
         rnd = Round(self.hub, FakeLLM(None))

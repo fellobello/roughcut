@@ -50,6 +50,15 @@ The projects column (left) and the cycle column (right) open and close with the 
 the top corners. The cycle lists the stages of a round (talk, plan, build files, design the
 page, check everything, test users, report) and lights up the one running.
 
+**Your answers are rules.** Every answer you've given (in the brainstorm or to a guess) goes
+to the planner, tester, builder and reviewer in every round, not just the round after you
+gave it, so a rule like "shares are whole dollars" can't get lost. Tests check values and
+behaviour, never the exact wording of a message or label the contract didn't spell out. A
+contract's examples are checked one by one: any that aren't real values are left out, and a
+plan whose examples are mostly junk is asked for again. When the reviewer finds a contract
+that can't work (it contradicts you, or a function is missing an input), the next plan
+revises it, and the file gets a fresh set of tries.
+
 **Nothing stops to ask you.** Like the Claude version, a run guesses and keeps going.
 
 **A file the builder keeps getting wrong is split.** After two failed attempts where the

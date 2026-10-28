@@ -26,6 +26,7 @@ SAFETY = (
     "does is rejected before it runs. Keep data in memory unless the contract says otherwise."
 )
 JSON_ONLY = "Reply with JSON only."
+RULES = "Rules from the owner (always follow these)"
 
 DESIGN_BRIEF = """Build the page from kit.css, a finished design system (light and dark mode, spacing,
 type, focus states are all done). Link it before styles.css. Use its classes:
@@ -177,18 +178,21 @@ async def user_verdict(sched, persona, brief, transcript, facts):
     return await sched.ask("user", _chat(system, user), f"user:{persona['key']}:verdict", reply="user_verdict")
 
 
-async def plan(sched, stack, idea, conventions, contracts_md, answers, first):
-    rules = (
+async def plan(sched, stack, idea, conventions, contracts_md, answers, first, rules=""):
+    how = (
         f"For each file give its path (like {stack.example}), its purpose, its exports and the other project "
         f"files it imports. Each export's signature is one exact line: {stack.export_hint}. Prefer small pure "
         "functions over data tables. Give every function 1 or 2 examples that pin down the part that could be read "
         f"two ways (an edge, invalid input, rounding, an order): call is one exact call with literal arguments, like "
         f"{stack.example_call}, and returns is exactly what it returns, as a literal in the same language, like "
-        f"{stack.example_returns}. The tests check these examples exactly, so work them out carefully."
+        f"{stack.example_returns}, or [58, 57]: a value, never a sentence. The tests check these examples exactly, "
+        "so work them out carefully, and make them follow the owner's rules. Write signatures, descriptions and "
+        f"examples in {stack.lang_name}, with its own library names. Every input a function needs must be one of "
+        "its arguments."
     )
     if first:
         job = (
-            f"Plan the smallest working sample of the idea as 2 to 5 logic files in app/. {rules} Keep imports "
+            f"Plan the smallest working sample of the idea as 2 to 5 logic files in app/. {how} Keep imports "
             "one-way, never in a circle. Do not plan tests or UI files: each logic file gets tests automatically"
             + (", and a designer makes the page from your exports. " if stack.name == "web" else ". ")
             + "List at most 3 big choices a user would care about (what is left out, a rounding or default rule) "
@@ -201,7 +205,7 @@ async def plan(sched, stack, idea, conventions, contracts_md, answers, first):
     else:
         job = (
             "The project has the files in Contracts. Using the answers below, return only files that are new or "
-            f"whose contract must change, each in full. {rules} Return an empty files list if nothing needs to "
+            f"whose contract must change, each in full. {how} Return an empty files list if nothing needs to "
             "change. Set complete to true when the files cover the whole idea and nothing more is worth adding. "
             "Record any new big choice as a guess."
         )
@@ -210,12 +214,13 @@ async def plan(sched, stack, idea, conventions, contracts_md, answers, first):
         _section("Idea", idea)
         + _section("Conventions", conventions)
         + _section("Contracts", contracts_md)
-        + _section("Answers from the user", "\n".join(f"- {q['text']} -> {q['answer']}" for q in answers))
+        + _section(RULES, rules)
+        + _section("New answers from the owner", "\n".join(f"- {q['text']} -> {q['answer']}" for q in answers))
     )
     return await sched.ask("planner", _chat(system, user), "plan", reply="planner")
 
 
-async def split(sched, stack, brief, folder, test_code, code, failure):
+async def split(sched, stack, brief, folder, test_code, code, failure, rules=""):
     """Break a file the builder keeps getting wrong into smaller files. Returns SPLIT data."""
     system = (
         f"Planner: {TEAM}\n"
@@ -225,11 +230,12 @@ async def split(sched, stack, brief, folder, test_code, code, failure):
         "pieces must cover everything it promises. Pieces may import each other, one way only, but never the original "
         f"file. For each piece give its path, purpose, exports and imports. Each export's signature is one exact line: "
         f"{stack.export_hint}. Give every function 1 or 2 examples: call is one exact call with literal arguments, like "
-        f"{stack.example_call}, and returns is exactly what it returns, as a literal, like {stack.example_returns}. "
-        f"In why, one sentence on what made the file hard. {SAFETY}\n{JSON_ONLY}"
+        f"{stack.example_call}, and returns is exactly what it returns, as a literal value, like {stack.example_returns}. "
+        f"Follow the owner's rules. In why, one sentence on what made the file hard. {SAFETY}\n{JSON_ONLY}"
     )
     user = (
-        _section("The file's contract", brief)
+        _section(RULES, rules)
+        + _section("The file's contract", brief)
         + _section("Its tests", test_code[:4000])
         + _section("The builder's best attempt", code[:4000])
         + _section("How it fails", failure[-1500:])
@@ -237,19 +243,22 @@ async def split(sched, stack, brief, folder, test_code, code, failure):
     return await sched.ask("planner", _chat(system, user), "split", reply="split")
 
 
-async def write_tests(sched, stack, brief, conventions, test_path, notes):
+async def write_tests(sched, stack, brief, conventions, test_path, notes, rules=""):
     """Returns (code, cut_off)."""
     system = (
         f"Tester: {TEAM}\n"
         "Write the test file for one file, using only its contract: you never see its code. Test each export "
         "once or twice with typical inputs, comparing floats with a tolerance, and name each test after the "
-        f"promise it checks. Test only what the contract promises. The contract's examples are added to your file "
+        "promise it checks. Test only what the contract and the owner's rules promise: values and behaviour. Never "
+        "test the exact wording of text, messages, labels or descriptions, or the names of keys, unless the contract "
+        "spells them out word for word; check that they exist instead. The contract's examples are added to your file "
         f"automatically, so test other cases. Keep the file under 80 lines. Start the file "
         f"with:\n{stack.test_header}\n{SAFETY}\n"
         f"{code_only(stack.lang)}"
     )
     user = (
         _section("Contract", brief)
+        + _section(RULES, rules)
         + _section("Conventions", conventions)
         + _section("Notes", "\n".join(notes))
         + _section("Write", test_path)
@@ -257,7 +266,7 @@ async def write_tests(sched, stack, brief, conventions, test_path, notes):
     return await sched.ask("tester", _chat(system, user), f"tests:{test_path}")
 
 
-def builder_conversation(stack, brief, path, test_path, conventions, lessons, notes, readable, max_steps):
+def builder_conversation(stack, brief, path, test_path, conventions, lessons, notes, readable, max_steps, rules=""):
     """The opening of a builder agent's conversation: its job, its actions and its limits."""
     actions = "\n".join(f"- {name}: {what}" for name, what in ACTIONS.items())
     system = (
@@ -271,6 +280,7 @@ def builder_conversation(stack, brief, path, test_path, conventions, lessons, no
     )
     user = (
         _section("Contract", brief)
+        + _section(RULES, rules)
         + _section("Conventions", conventions)
         + _section("Lessons from earlier files", lessons)
         + _section("Notes", "\n".join(notes))
@@ -333,15 +343,19 @@ async def design_styles(sched, html, notes):
     return await sched.ask("designer", _chat(system, user), "design:styles.css")
 
 
-async def review(sched, brief, test_code, code, failure):
+async def review(sched, brief, test_code, code, failure, rules=""):
     system = (
         f"Reviewer: {TEAM}\n"
-        "A file keeps failing its tests. Decide who is wrong. blame is 'code' if the file breaks its "
-        "contract, 'test' if the test expects something the contract doesn't promise, or 'contract' "
-        f"if the contract itself can't work as written. Give the reason in one or two sentences. {JSON_ONLY}"
+        "A file keeps failing its tests. Decide who is wrong. blame is 'code' if the file breaks its contract or "
+        "the owner's rules. blame is 'test' if a test expects something the contract doesn't promise, like the exact "
+        "wording of a message or description, or a rule the owner didn't give. blame is 'contract' if the contract "
+        "can't work as written: it contradicts the owner's rules, its examples are wrong, or a function needs an input "
+        "it isn't given. Don't blame the code for doing what the owner asked. Give the reason in one or two "
+        f"sentences. {JSON_ONLY}"
     )
     user = (
-        _section("Contract", brief)
+        _section(RULES, rules)
+        + _section("Contract", brief)
         + _section("Test file", test_code)
         + _section("Code", code)
         + _section("Failure", failure)

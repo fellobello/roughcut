@@ -171,6 +171,7 @@ class Stack:
 
 class Python(Stack):
     name, lang, example = "python", "python", "app/geo.py"
+    lang_name = "Python"
     path_re = re.compile(r"^app/([a-z_][a-z0-9_]*/)*[a-z_][a-z0-9_]*\.py$")
     test_glob = "tests/test_*.py"
     conventions = [
@@ -203,9 +204,17 @@ class Python(Stack):
     def test_hint(self, test_path):
         return f"python3 -m unittest {test_path[:-3].replace('/', '.')}"
 
-    def example_tests(self, contract):
+    def example_ok(self, call, returns):
+        """Whether one example is valid code: a call and a value."""
+        try:
+            compile(f"(({call}), ({returns}))", "<example>", "eval")
+            return True
+        except SyntaxError:
+            return False
+
+    def example_tests(self, contract, cases=None):
         """The contract's examples as a test case, added to the end of the tester's file."""
-        cases = example_cases(contract)
+        cases = example_cases(contract) if cases is None else cases
         if not cases:
             return ""
         lines = [
@@ -259,6 +268,7 @@ class Python(Stack):
 
 class Web(Stack):
     name, lang, example = "web", "javascript", "app/tip.js"
+    lang_name = "JavaScript (Math.round, not math.round)"
     path_re = re.compile(r"^app/([a-z_][a-z0-9_]*/)*[a-z_][a-z0-9_]*\.js$")
     test_glob = "tests/*.test.mjs"
     conventions = [
@@ -298,9 +308,13 @@ class Web(Stack):
     def test_hint(self, test_path):
         return f"node --test {test_path}"
 
-    def example_tests(self, contract):
+    def example_ok(self, call, returns):
+        """Whether one example is valid code: a call and a value."""
+        return not self.syntax_error(f"void (({call}), ({returns}));\n", "example.js")
+
+    def example_tests(self, contract, cases=None):
         """The contract's examples as one test, added to the end of the tester's file."""
-        cases = example_cases(contract)
+        cases = example_cases(contract) if cases is None else cases
         if not cases:
             return ""
         lines = [
