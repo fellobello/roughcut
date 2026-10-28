@@ -32,7 +32,7 @@ from . import project
 from .brainstorm import Brainstorm
 from .hub_local import LocalHub
 from .llm import LLMError, OllamaClient
-from .rounds import DESIGN_TASK, Round
+from .rounds import Round
 from .users import TestUsers
 
 IDEA = "A tip calculator: enter the bill, pick a tip percent and the number of people; see the tip, the total and each person's share."

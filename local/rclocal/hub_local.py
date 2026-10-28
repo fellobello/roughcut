@@ -107,6 +107,19 @@ class LocalHub(Hub):
                     cfg[key] = value
         return cfg
 
+    def set_model(self, role, model):
+        """Give a role another model, from the next call on."""
+        from .protocol import ROLES
+
+        if role not in ROLES or not model.strip():
+            raise HubError(f"pick a role from {', '.join(ROLES)} and a model")
+        with self.locked():
+            path = self.root / "local.json"
+            cfg = self._read(path) if path.exists() else {}
+            cfg.setdefault("models", {})[role] = model.strip()
+            self._write(path, cfg)
+        return self.local_config()["models"]
+
     # Tasks without worktrees
 
     def start_tasks(self, limit=None):

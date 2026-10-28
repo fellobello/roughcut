@@ -20,7 +20,31 @@ local/roughcut-local new "a pace calculator for runners"
 ```
 
 That talks the idea through with you, builds it in up to 4 rounds, then opens the app in
-your browser. The project goes in `~/roughcut-projects/<name>`. Come back to it later, by
+your browser.
+
+Or do all of it from one page in your browser:
+
+```bash
+local/roughcut-local studio
+```
+
+The studio (http://127.0.0.1:8770) has your projects on the left (open one, start a new
+one, or open a folder or GitHub repo) and five tabs:
+
+- **Talk**: chat with the brainstormer. Its questions come up as buttons; click an option,
+  type your own answer, or press Keep talking to take its picks. Build starts the rounds.
+- **Build**: the round as it runs: tasks, model calls, speed, what happened. Stop after this round.
+- **Questions**: what the rounds guessed or need from you, one click to keep or change.
+- **App**: the app running inside the page, and every screenshot from the rounds and test users.
+- **Models**: whether Ollama answers, what's installed, and a model per role (changes are
+  used from the next call). Performance settings will go here later.
+
+The page talks only to the desk (`rclocal/desk.py`), which talks to the hub. The desk
+knows what the hub doesn't: which project is open, where the chat is, and what's running.
+It runs one job at a time in the background (a brainstorm turn, rounds, reading a project
+brought in), so two rounds never touch the same hub. The server listens on 127.0.0.1 only,
+and every change needs a token that's only in the page it serves, so other websites can't
+drive it. The project goes in `~/roughcut-projects/<name>`. Come back to it later, by
 folder, by name, or bring in a GitHub repo:
 
 ```bash

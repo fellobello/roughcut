@@ -246,6 +246,42 @@ def clone(url):
     return target
 
 
+def locate(target, in_place=False):
+    """The folder to work in for a path, a project name or a GitHub URL. Returns (folder, needs bringing in).
+
+    A GitHub repo is cloned into the projects folder; any other folder that isn't a
+    roughcut-local project yet is copied there, unless in_place.
+    """
+    if is_github(target):
+        folder = clone(target)
+    else:
+        folder = find(target)
+        if folder is None:
+            raise RuntimeError(f"no project or folder called {target!r}")
+    if (folder / ".hub" / "hub.json").exists():
+        return folder, False
+    if not is_github(target) and not in_place:
+        folder = copy_folder(folder)
+    return folder, True
+
+
+def bring_in(folder, llm, stack=None, echo=None):
+    """Make a folder a roughcut-local project and survey its code. Returns (hub, what was found)."""
+    import asyncio
+
+    from .hub_local import LocalHub
+    from .rounds import commit
+    from .scheduler import Scheduler
+
+    hub = LocalHub(folder)
+    hub.init(first_words(folder), {"stack": stack or guess_stack(folder)})
+    hub.events.echo = echo
+    found = asyncio.run(survey(hub, Scheduler(llm, hub.local_config(), hub.events), hub.events))
+    commit(hub.project, "Brought in")
+    render(hub)
+    return hub, found
+
+
 def copy_folder(source):
     target = free_folder(slug(source.name, "project"))
     shutil.copytree(source, target, ignore=shutil.ignore_patterns("node_modules", ".venv", "venv", "__pycache__", ".worktrees"))

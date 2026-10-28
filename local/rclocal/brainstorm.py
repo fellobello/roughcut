@@ -30,6 +30,9 @@ class Brainstorm:
 
     def start(self, thoughts):
         """Begin a session with what you want: the idea, or the changes you have in mind."""
+        if self.hub.contracts.all():  # changes to a project that exists: the planner should see them as asked
+            q = self.hub.ask(HUB_OWNER, "What should change next?", critical=True, choice="(in your words)")
+            self.hub.answer(q["id"], thoughts)
         self.talk.append({"who": "you", "text": thoughts.strip(), "start": True})
         self.save()
 

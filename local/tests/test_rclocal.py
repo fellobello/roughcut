@@ -21,7 +21,8 @@ from rclocal.brainstorm import Brainstorm  # noqa: E402
 from rclocal.contracts import ContractError, file_id  # noqa: E402
 from rclocal.events import Events  # noqa: E402
 from rclocal.hub_local import LocalHub  # noqa: E402
-from rclocal.llm import FakeLLM  # noqa: E402
+from rclocal.llm import FakeLLM, OllamaClient  # noqa: E402
+from hub import HubError  # noqa: E402
 from rclocal.rounds import DESIGN_TASK, Round, check_code, clean_code  # noqa: E402
 from rclocal.runner import Runner  # noqa: E402
 from rclocal.scheduler import Scheduler  # noqa: E402
@@ -746,6 +747,130 @@ class TrialTest(unittest.TestCase):
         _, (checks, detail) = self.trial("brainstormer", lambda *a: BRAINSTORM_REPLY)
         self.assertTrue(all(checks.values()), checks)
         self.assertIn("How do people vote?", detail)
+
+
+class DeskTest(unittest.TestCase):
+    """The studio's go-between, with a fake model: no AI is run."""
+
+    def setUp(self):
+        from rclocal.desk import Desk
+
+        self.desk = Desk(llm_for=lambda hub: FakeLLM(lambda *a: BRAINSTORM_REPLY))
+
+    def tearDown(self):
+        self.desk.stop_app()
+
+    def settle(self):
+        for _ in range(200):
+            if not self.desk.busy:
+                return
+            time.sleep(0.02)
+        self.fail("the desk never finished")
+
+    def test_a_new_project_starts_a_talk_with_questions(self):
+        self.desk.new("something for my book club")
+        self.settle()
+        state = self.desk.state()
+        self.assertEqual(state["project"]["name"], "Book Club Picker")
+        self.assertEqual([p["question"]["text"] for p in state["pending"]], ["How do people vote?", "Keep a history?"])
+        self.desk.answer(1, "yes")
+        self.assertEqual(self.desk.state()["pending"][1]["answer"], "yes")
+        self.desk.keep_talking()  # the unanswered one takes the pick
+        self.settle()
+        answered = {q["text"]: q["answer"] for q in self.desk.hub.questions() if q["status"] == "answered"}
+        self.assertEqual(answered, {"How do people vote?": "one vote each", "Keep a history?": "yes"})
+        whos = [m["who"] for m in self.desk.chat()]
+        self.assertEqual(whos[:3], ["desk", "you", "brainstormer"])
+        self.assertTrue((self.desk.hub.project / "PROJECT.md").exists())
+
+    def test_one_job_at_a_time_and_a_project_first(self):
+        with self.assertRaises(HubError):
+            self.desk.say("hello")
+        self.desk.new("something for my book club")
+        if self.desk.busy:
+            with self.assertRaises(HubError):
+                self.desk.say("and another thing")
+        self.settle()
+
+    def test_models_can_be_changed_per_role(self):
+        self.desk.new("something for my book club")
+        self.settle()
+        self.desk.set_model("designer", "qwen2.5-coder:14b")
+        self.assertEqual(self.desk.hub.local_config()["models"]["designer"], "qwen2.5-coder:14b")
+        self.assertEqual(self.desk.hub.local_config()["models"]["planner"], "qwen3:8b")  # others unchanged
+        with self.assertRaises(HubError):
+            self.desk.set_model("wizard", "x")
+
+
+class StudioTest(unittest.TestCase):
+    def setUp(self):
+        from rclocal.desk import Desk
+        from rclocal.studio import make_server
+
+        self.desk = Desk(llm_for=lambda hub: FakeLLM(lambda *a: BRAINSTORM_REPLY))
+        self.server = make_server(self.desk, port=0)
+        self.port = self.server.server_address[1]
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+    def call(self, path, body=None, token=True, host=None):
+        import urllib.error
+        import urllib.request
+
+        headers = {"Host": host or f"127.0.0.1:{self.port}", "Content-Type": "application/json"}
+        if token:
+            headers["X-Token"] = self.server.token
+        req = urllib.request.Request(f"http://127.0.0.1:{self.port}{path}", headers=headers,
+                                     data=json.dumps(body).encode() if body is not None else None)
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:
+                return r.status, r.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.read()
+
+    def test_changes_need_the_token_and_the_right_host(self):
+        self.assertEqual(self.call("/api/new", {"idea": "x"}, token=False)[0], 403)
+        self.assertEqual(self.call("/api/state", host="evil.example:80")[0], 403)
+        status, page = self.call("/")
+        self.assertEqual(status, 200)
+        self.assertIn(self.server.token.encode(), page)
+        status, body = self.call("/api/state")
+        self.assertIsNone(json.loads(body)["project"])
+        self.assertEqual(self.call("/api/say", {"text": "hi"})[0], 400)  # no project yet: refused, not crashed
+
+    def test_open_a_project_and_change_a_model(self):
+        hub = LocalHub(Path(os.environ["ROUGHCUT_PROJECTS"]) / "studio-test")
+        hub.init("A tip calculator", {"stack": "web"})
+        self.assertEqual(self.call("/api/open", {"path": str(hub.project)})[0], 200)
+        state = json.loads(self.call("/api/state")[1])
+        self.assertEqual(state["project"]["path"], str(hub.project))
+        self.assertIn("tasks", state["status"])
+        self.assertEqual(self.call("/api/model", {"role": "user", "model": "llama3.2:3b"})[0], 200)
+        self.assertEqual(hub.local_config()["models"]["user"], "llama3.2:3b")
+
+
+def ollama_up():
+    try:
+        OllamaClient().installed()
+        return True
+    except Exception:
+        return False
+
+
+@unittest.skipUnless(ollama_up(), "Ollama isn't running")
+class OllamaReachTest(unittest.TestCase):
+    """Only checks Ollama answers and lists models; it runs no model."""
+
+    def test_the_studio_sees_ollama_and_its_models(self):
+        from rclocal.desk import Desk
+
+        models = Desk().models()
+        self.assertTrue(models["reachable"], models["error"])
+        self.assertTrue(models["installed"])
+        self.assertEqual([r["role"] for r in models["roles"]], list(protocol.ROLE_JOBS))
 
 
 CHROME = Runner(Path("."), WEB).chrome()

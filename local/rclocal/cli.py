@@ -1,5 +1,6 @@
 """roughcut-local: build a software idea a round at a time with local Ollama models only.
 
+    roughcut-local studio                                    # everything below, in one page in your browser
     roughcut-local new "a bill splitter for group dinners"   # talk it through, build, open the app
     roughcut-local open ~/roughcut-projects/bill-splitter    # or a project name, or a GitHub URL
     roughcut-local projects                                  # every project made or opened here
@@ -26,10 +27,10 @@ from pathlib import Path
 
 from . import project
 from .brainstorm import LETTERS, Brainstorm
-from .hub_local import HUB_OWNER, HubError, LocalHub
+from .hub_local import HubError, LocalHub
 from .llm import LLMError, OllamaClient
 from .protocol import ROLES
-from .rounds import Round, commit
+from . import rounds as rounds_mod
 from .runner import Runner, free_port
 from .scheduler import Scheduler
 from .stacks import STACKS
@@ -104,9 +105,6 @@ def talk(hub, client, thoughts):
     cfg = hub.local_config()
     idea = (hub.root / "idea.md").read_text(encoding="utf-8")
     session = Brainstorm(hub)
-    if hub.contracts.all():  # changes to a project that exists: the planner should see them as asked
-        q = hub.ask(HUB_OWNER, "What should change next?", critical=True, choice="(in your words)")
-        hub.answer(q["id"], thoughts)
     session.start(thoughts)
     turns = cfg["brainstorm_turns"]
     print("\nLet's talk it through first. Enter takes my pick, a letter picks an option, or type your own answer.")
@@ -183,24 +181,11 @@ def run_rounds(hub, client, rounds, ui=None, quiet=False):
         server = serve(hub, client, ui)
         threading.Thread(target=server.serve_forever, daemon=True).start()
         print(f"Status page: http://127.0.0.1:{ui}", flush=True)
-    summaries = []
-    for _ in range(rounds):
-        before = sum(t["status"] == "done" for t in hub.tasks())
-        summary = asyncio.run(Round(hub, client, echo=None if quiet else echo).run())
-        summaries.append(summary)
+    summaries, why = rounds_mod.run_rounds(hub, client, rounds, echo=None if quiet else echo)
+    for summary in summaries:
         print(json.dumps(summary, indent=2), flush=True)
-        after = sum(t["status"] == "done" for t in hub.tasks())
-        todo = any(t["status"] == "todo" for t in hub.tasks())
-        if summary["open_questions"]:
-            print("Stopping: some questions need your answer (roughcut-local questions --ask).", flush=True)
-            break
-        if summary["complete"] and not todo and summary["tests_passed"]:
-            print("Stopping: the planner says the idea is covered and every test passes.", flush=True)
-            break
-        if after == before and not todo:
-            print("Stopping: the last round made no progress.", flush=True)
-            break
-    return {"rounds": len(summaries), "last": summaries[-1] if summaries else None}
+    print(f"Stopped: {why}." + (" Answer with: roughcut-local questions --ask" if "questions" in why else ""), flush=True)
+    return {"rounds": len(summaries), "stopped": why, "last": summaries[-1] if summaries else None}
 
 
 def serve_app(hub, port=None, open_browser=True):
@@ -254,30 +239,14 @@ def cmd_new(args):
 
 
 def cmd_open(args):
-    target = args.target
-    if project.is_github(target):
-        print(f"Cloning {target} …", flush=True)
-        folder = project.clone(target)
-    else:
-        folder = project.find(target)
-        if folder is None:
-            raise HubError(f"no project or folder called {target!r}; see roughcut-local projects")
-    if not (folder / ".hub" / "hub.json").exists():
-        if not project.is_github(target) and not args.in_place:
-            folder = project.copy_folder(folder)
-            print(f"Working on a copy in {folder}, so your folder stays as it is", flush=True)
-        hub = LocalHub(folder)
-        hub.init(project.first_words(folder), {"stack": args.stack or project.guess_stack(folder)})
-        client = client_for(hub)
-        print("Reading the existing code …", flush=True)
-        hub.events.echo = echo
-        sched = Scheduler(client, hub.local_config(), hub.events)
-        found = asyncio.run(project.survey(hub, sched, hub.events))
+    folder, new = project.locate(args.target, args.in_place)
+    if new:
+        print(f"Working in {folder}; reading the existing code …", flush=True)
+        hub, found = project.bring_in(folder, OllamaClient(), args.stack, echo)
         print(f"Contracts for: {', '.join(found['surveyed']) or 'nothing (no files in app/)'}", flush=True)
-        commit(hub.project, "Brought in")
     else:
         hub = LocalHub(folder)
-        client = client_for(hub)
+    client = client_for(hub)
     project.render(hub)
     print(f"\n{(hub.project / 'PROJECT.md').read_text(encoding='utf-8')[:1500]}", flush=True)
     thoughts = args.thoughts or ask("\nWhat would you like to change or add? > ")
@@ -296,6 +265,12 @@ def cmd_projects(args):
     if not rows:
         print("No projects yet: roughcut-local new \"your idea\"")
     return {"projects": len(rows)}
+
+
+def cmd_studio(args):
+    from . import studio
+
+    return studio.main(args)
 
 
 def cmd_trial(args):
@@ -401,6 +376,10 @@ def build_parser():
 
     sub.add_parser("projects", help="list every project made or opened here")
 
+    p = sub.add_parser("studio", help="the web page for everything: pick a project, talk, build, answer, try the app")
+    p.add_argument("--port", type=int, default=8770)
+    p.add_argument("--no-open", action="store_true", help="don't open it in your browser")
+
     p = sub.add_parser("trial", help="try models on dummy tasks for one role, and compare them")
     p.add_argument("--role", choices=["brainstormer", "planner", "tester", "builder", "designer", "user"], required=True)
     p.add_argument("--models", help="comma-separated (default: every installed model)")
@@ -444,7 +423,7 @@ def build_parser():
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
-    free = {"new": cmd_new, "open": cmd_open, "projects": cmd_projects, "trial": cmd_trial}
+    free = {"new": cmd_new, "open": cmd_open, "projects": cmd_projects, "trial": cmd_trial, "studio": cmd_studio}
     on_project = {
         "init": cmd_init,
         "check": cmd_check,
@@ -459,6 +438,7 @@ def main(argv=None):
     }
     try:
         if args.command in free:
+            args.project_path = args.project if args.project != "." else None
             result = free[args.command](args)
         else:
             result = on_project[args.command](LocalHub(args.project), args)

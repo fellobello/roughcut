@@ -682,6 +682,31 @@ class Round:
         commit(self.hub.project, message)
 
 
+def run_rounds(hub, llm, rounds, echo=None, stop=lambda: False):
+    """Run up to `rounds` rounds in a row. Returns (summaries, why it stopped).
+
+    Stops early when a question blocks work, when the planner says the idea is covered and
+    every test passes, when a round makes no progress, or when stop() says so (checked
+    between rounds; a round in progress always finishes).
+    """
+    summaries = []
+    for _ in range(rounds):
+        before = sum(t["status"] == "done" for t in hub.tasks())
+        summary = asyncio.run(Round(hub, llm, echo=echo).run())
+        summaries.append(summary)
+        after = sum(t["status"] == "done" for t in hub.tasks())
+        todo = any(t["status"] == "todo" for t in hub.tasks())
+        if summary["open_questions"]:
+            return summaries, "some questions need your answer"
+        if summary["complete"] and not todo and summary["tests_passed"]:
+            return summaries, "the planner says the idea is covered and every test passes"
+        if after == before and not todo:
+            return summaries, "the last round made no progress"
+        if stop():
+            return summaries, "you asked it to stop"
+    return summaries, f"ran the {rounds} round{'s' if rounds != 1 else ''} asked for"
+
+
 def commit(folder, message):
     """Commit everything in the project, so every step can be looked at and undone."""
     git = ["git", "-C", str(folder)]
