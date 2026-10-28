@@ -424,6 +424,14 @@ class RoundTest(HubCase):
         self.assertTrue(summary["tests_passed"])
         self.assertEqual(self.hub.contracts.get("app/report.py")["imports"], ["app/convert.py"])
 
+    def test_files_that_import_each_other_are_untangled(self):
+        circle = {**CONVERT, "imports": ["app/report.py"]}
+        summary = self.run_round(Script({"app/convert.py": [CONVERT_GOOD], "app/report.py": [REPORT_GOOD]},
+                                        PY_TESTS, plan_of([circle, REPORT])))
+        self.assertTrue(summary["tests_passed"])
+        self.assertEqual(self.hub.contracts.get("app/convert.py")["imports"], [])
+        self.assertEqual(self.hub.contracts.get("app/report.py")["imports"], ["app/convert.py"])
+
     def test_contract_requests_extend_the_other_file(self):
         script = py_script({"app/convert.py": [CONVERT_GOOD], "app/report.py": [REPORT_GOOD]})
         rnd = Round(self.hub, FakeLLM(script))
@@ -444,6 +452,15 @@ class RoundTest(HubCase):
 @unittest.skipUnless(HAS_NODE, "needs node")
 class WebRoundTest(HubCase):
     stack = "web"
+
+    def test_ui_files_are_left_to_the_page(self):
+        rnd = Round(self.hub, FakeLLM(None))
+        rnd.number = 0
+        ui = {"path": "app/ui.js", "purpose": "Draw the board", "exports": [export("draw", "function draw(board)")],
+              "imports": ["app/tip.js"]}
+        skipped = rnd.apply_plan(plan_of([TIP, ui]))
+        self.assertEqual([c["path"] for c in self.hub.contracts.all()], ["app/tip.js"])
+        self.assertIn("page's own script", skipped[0])
 
     def test_a_web_round_builds_logic_then_a_checked_page(self):
         checked = []

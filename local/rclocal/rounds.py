@@ -47,6 +47,8 @@ STUCK_OPTIONS = [
 ]
 KEEP_TURNS = 12  # agent messages kept after the opening two, so its context stays small
 DESIGN_TASK = "page-design"
+# On the web stack the page's own script is the UI; a logic file by one of these names would need the DOM.
+UI_NAMES = {"ui", "dom", "view", "views", "page", "index", "main", "app", "display", "render", "renderer", "interface", "screen"}
 VERIFY_PARALLEL = 3
 
 
@@ -169,6 +171,7 @@ class Round:
 
     async def plan(self, idea):
         hub = self.hub
+        self.untangle()  # also repairs a project an earlier version left with circular imports
         first = not hub.contracts.all()
         answers = hub.answered_since(self.number)
         has_todo = any(t["status"] == "todo" for t in hub.tasks())
@@ -202,6 +205,12 @@ class Round:
                     "imports": [tidy_path(p, self.stack) for p in file_plan["imports"] if p.strip()]}
             if tidy["path"] != file_plan["path"]:
                 self.events.emit("note", text=f"renamed {file_plan['path']} to {tidy['path']} to fit the layout")
+            stem = posixpath.splitext(posixpath.basename(tidy["path"]))[0]
+            if self.stack.name == "web" and stem in UI_NAMES:
+                why = f"{tidy['path']} would be UI code, which belongs in the page's own script (the designer writes it)"
+                self.events.emit("note", text=f"skipped a planned file: {why}")
+                skipped.append(why)
+                continue
             try:
                 contract, what = contracts.upsert(tidy, self.number, f"round {self.number} plan")
             except (ContractError, ValueError) as e:
@@ -220,8 +229,10 @@ class Round:
                     f"dropped imports with no contract: {', '.join(unknown)}",
                 )
                 planned[i] = (contract, what)
+        self.untangle([c["path"] for c, _ in planned])
         changed = False
         for contract, what in planned:
+            contract = contracts.get(contract["path"])  # untangle may have changed its imports
             if what == "same":
                 continue
             changed = True
@@ -237,6 +248,44 @@ class Round:
         if errors:
             raise HubError("the plan's task graph is invalid: " + "; ".join(errors))
         return skipped
+
+    def untangle(self, order=()):
+        """Break circular imports. Returns the (file, import) pairs dropped.
+
+        Imports must go one way, but small planners sometimes have two files import each
+        other. Rather than refuse the whole plan, the import that closes each circle is
+        dropped (the file keeps its purpose and exports), and the build tasks' dependencies
+        are made to match the contracts again. Planners list the files others build on
+        first, so of two files in a circle, the later one keeps its import of the earlier
+        (`order` is the plan's order; without one, reverse alphabetical).
+        """
+        contracts = self.hub.contracts
+        graph = {c["path"]: list(c["imports"]) for c in contracts.all()}
+        dropped, state = [], {}
+
+        def visit(path):
+            state[path] = "visiting"
+            for other in list(graph[path]):
+                if state.get(other) == "visiting":
+                    graph[path].remove(other)
+                    dropped.append((path, other))
+                elif other in graph and other not in state:
+                    visit(other)
+            state[path] = "done"
+
+        listed = [p for p in order if p in graph]
+        for path in list(reversed(listed)) + sorted((p for p in graph if p not in listed), reverse=True):
+            if path not in state:
+                visit(path)
+        for path, other in dropped:
+            contracts.set_imports(path, graph[path], self.number, f"dropped the import of {other}, which imports it back")
+            self.events.emit("note", text=f"{path} and {other} imported each other, so {path} no longer imports {other}")
+        if dropped:
+            have = {t["id"] for t in self.hub.tasks()}
+            for c in contracts.all():
+                if c["id"] in have:
+                    self.hub.set_depends(c["id"], [c["id"] + "-tests"] + [file_id(i) for i in c["imports"]])
+        return dropped
 
     def ensure_tasks(self, contract, what):
         hub = self.hub
