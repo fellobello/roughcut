@@ -161,6 +161,7 @@ class Round:
         self.requests = []  # (task id, contract request), applied between tasks
         self.number = None
         self.page_checked = False  # a page passed its check this round, so the test users try it
+        self.simplify = []  # TEMP(test-run): "Simplify it" answers from revisit_stuck, so the planner sees them
 
     # The round
 
@@ -230,6 +231,9 @@ class Round:
         self.untangle()  # also repairs a project an earlier version left with circular imports
         first = not hub.contracts.all()
         answers = hub.answered_since(self.number)
+        # TEMP(test-run): a stuck file's "Simplify it" given mid-round has answered_round < this round, so
+        # answered_since() drops it and the plan is skipped; feed it to the planner explicitly.
+        answers += [q for q in self.simplify if q["id"] not in {a["id"] for a in answers}]
         has_todo = any(t["status"] == "todo" for t in hub.tasks())
         if not (first or answers or not has_todo):
             self.events.emit("note", text="unfinished tasks and no new answers, so the plan stays as it is")
@@ -849,6 +853,9 @@ class Round:
                     hub.set_field(task["id"], "accepted", True)
                     self.events.emit("note", text=f"{contract['path']}: done, because you said it works as it is")
                     break
+                if q["answer"] == "Simplify it":  # TEMP(test-run): was treated exactly like Try again
+                    self.simplify.append({**q, "text": f"{q['text']} Simplify the contract of {contract['path']} "
+                                          "so it can work and be tested as written."})
                 if q["answer"] not in KEEP_ANSWERS:
                     hub.restart(task["id"], f"you said: {q['answer']}")
                     self.events.emit("note", text=f"{contract['path']}: trying again, because you said: {q['answer']}")
