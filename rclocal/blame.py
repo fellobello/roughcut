@@ -65,11 +65,16 @@ def imported_names(stack, test_code, path):
     return {n.split(" as ")[0].strip() for g in groups for n in g.split(",") if n.strip()}
 
 
-def contradictions(contract, test_code):
-    """Tests that expect something else than the contract's own example for the same call: [(call, expected, promised)]."""
+def contradictions(stack, contract, test_code):
+    """Tests that expect something else than the contract's own example for the same call: [(call, expected, promised)].
+
+    Only examples that are values count: one like `math.round(57.5)` is the contract's own mistake.
+    """
     code = compact(tester_part(test_code))
     found = []
     for call, returns in example_cases(contract):
+        if not stack.example_ok(call, returns):
+            continue
         needle = compact(call)
         start = 0
         while (at := code.find(needle, start)) >= 0:
@@ -105,6 +110,8 @@ def settle(stack, contract, test_code, code, failure):
         return verdict("code", f"{path} isn't valid code")
     for match in WEB_MISSING.finditer(failure or ""):
         module, name = match.groups()
+        if module.endswith(path) and name == "default":
+            return verdict("test", f"the tests use a default import, but {path} has named exports")
         if module.endswith(path) and name not in names:
             return verdict("test", f"the tests import {name}, which the contract doesn't have")
         return verdict("code", f"{module} doesn't export {name}, which the contract promises")
@@ -124,7 +131,7 @@ def settle(stack, contract, test_code, code, failure):
         return verdict("contract", f"its examples give two results for {call}: {one} and {other}")
 
     # 3. Tests that expect something else than the contract's example for the same call.
-    wrong = contradictions(contract, test_code)
+    wrong = contradictions(stack, contract, test_code)
     if wrong:
         call, expected, promised = wrong[0]
         return verdict("test", f"a test expects {expected} for {call}, but the contract's example says {promised}")
@@ -137,6 +144,9 @@ def settle(stack, contract, test_code, code, failure):
         return verdict("code", f"{path} fails the contract's own examples")
     if CRASH.search(failure):
         return None  # something threw: the code on an input the examples don't cover, or the test itself
+    if any(not any(stack.example_ok(x["call"], x["returns"]) for x in e.get("examples", []))
+           for e in contract["exports"] if "(" in e["signature"]):
+        return None  # a function without usable examples: the failing tests may be about it, and nothing pins it down
     return verdict("test", f"{path} meets every example in its contract; the failing tests ({', '.join(failed[:3])}) "
                            "ask for more than the contract promises")
 

@@ -1466,6 +1466,13 @@ class BlameTest(unittest.TestCase):
         clash = {**self.TIP_CONTRACT, "exports": [export("tipFor", "function tipFor(bill, percent) -> number", examples=[
             {"call": "tipFor(100, 15)", "returns": "15"}, {"call": "tipFor(100,15)", "returns": "15.5"}])]}
         self.assertEqual(self.settle(tests, "✖ tips\n", contract=clash)["blame"], "contract")
+        bare = {**self.TIP_CONTRACT, "exports": self.TIP_CONTRACT["exports"] + [export("roundTip", "function roundTip(x) -> number")]}
+        self.assertIsNone(self.settle(tests, "✖ tips\n✔ the contract examples hold\n", contract=bare))  # roundTip has no examples
+        junk = {**self.TIP_CONTRACT, "exports": [export("tipFor", "function tipFor(bill, percent) -> number",
+                                                        examples=[{"call": "tipFor(100, 15)", "returns": "math.round(15)"}])]}
+        self.assertIsNone(self.settle(tests.replace("tipFor(200, 10), 20", "tipFor(100, 15), 15"), "✖ tips\n", contract=junk))
+        default = "SyntaxError: The requested module '../app/tip.js' does not provide an export named 'default'"
+        self.assertIn("default import", self.settle(tests, default)["reason"])
 
     def test_the_reviewer_must_quote_the_contract_to_blame_it(self):
         from rclocal.blame import failed_tests, quoted

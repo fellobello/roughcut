@@ -355,3 +355,27 @@ Model time went up because the split pieces needed many attempts. Most failures 
 - **Deterministic before generative**: every fix in this session that worked best was code, not a prompt (literal check, re-export shim, repeat-question filter, import repair). The general rule: whenever a small model's mistake is recognisable by a regex or by running node, catch it in code and either repair it or send back a one-line reason.
 
 Sources: Agentless — github.com/OpenAutoCoder/Agentless (via newfacade.github.io/notes-on-llm/agent/agentless.html); AlphaCodium — arxiv.org/abs/2401.08500; Aider — aider.chat/docs/usage/lint-test.html.
+
+## Replay: the blame checks on runs 1 and 2 (no model calls)
+
+`tools/replay_blame.py` unpacks each round's build commit, reruns the tests of every file the reviewer judged that round, and puts the facts' verdict (`rclocal/blame.py`) beside the reviewer's. 22 (round, file) cases; the code is the last version of that round, so a file reviewed twice in a round is replayed once. Truth is from the notes above, or by hand.
+
+| Case | Reviewer | Facts | Really wrong |
+|---|---|---|---|
+| run 2 r0 split.js | code | code | code ✓ |
+| run 2 r0 split_amount.js | code | code | code: it adds the tip again; the examples pin the right numbers ✓ |
+| run 2 r0, r1, r2, r3 validate_input.js | contract ×4 | reviewer ×4 | test (r0, r3: `.message` object, `t.throwsAsync`), code (r1) |
+| run 2 r1 calculate_total.js | code | test | test: expects -100 for a bill the rules refuse ✓ |
+| run 2 r2, r3 calculate_total.js | contract ×2 | test ×2 | test: default import ✓ |
+| run 2 r4 bill.js | contract | code | code: `(100, 0)` gave 0, the example says 100 ✓ |
+| run 2 r4 split_logic, split_amount, split.js | contract ×3 | code ×3 | arguable: the code was right in any order, the examples fix one order; "code" asks it to match the order, which a builder can do |
+| run 1 r1, r2 split_bill.js | code ×2 | code ×2 | code: a parameter hid the import ✓ |
+| run 1 r4 bill.js | code | code | code ✓ |
+| run 1 r1 bill.js | code | reviewer | code (splitBill had no examples, so the facts don't decide) |
+| run 1 r0 bill.js, utils.js | contract ×2 | code ×2 | contract: examples like `math.round(...)`. Can't happen now: such examples never reach the tests |
+| run 1 r0, r1 dark_mode.js | contract ×2 | code ×2 | contract: a logic file that needs the page. Now refused at plan and build time |
+| run 1 r2 dark_mode.js | code | (passes at the build commit) | — |
+
+- **Run 2 (today's pipeline): the facts settled 9 of 13 and got none wrong** (5 right, 4 arguable order cases). The reviewer got 8 of the same 13 wrong. The 4 left to the reviewer are all validate_input.js, where something threw; that's the next thing to look at (a thrown non-Error, a test API node doesn't have).
+- **Run 1:** the 4 cases the facts get wrong all come from contract mistakes the current checks stop earlier (non-value examples, a logic file that needs the page). So a wrong contract example still makes the facts blame the code; your example checks are what protect against that.
+- Two rules were tightened by the replay: an example that isn't a value doesn't count against a test, and "the code meets every example" only blames the tests when every function has usable examples (run 1 r1 bill.js would otherwise have blamed the tests for a real code bug).
