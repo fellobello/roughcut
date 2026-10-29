@@ -379,3 +379,26 @@ Sources: Agentless — github.com/OpenAutoCoder/Agentless (via newfacade.github.
 - **Run 2 (today's pipeline): the facts settled 9 of 13 and got none wrong** (5 right, 4 arguable order cases). The reviewer got 8 of the same 13 wrong. The 4 left to the reviewer are all validate_input.js, where something threw; that's the next thing to look at (a thrown non-Error, a test API node doesn't have).
 - **Run 1:** the 4 cases the facts get wrong all come from contract mistakes the current checks stop earlier (non-value examples, a logic file that needs the page). So a wrong contract example still makes the facts blame the code; your example checks are what protect against that.
 - Two rules were tightened by the replay: an example that isn't a value doesn't count against a test, and "the code meets every example" only blames the tests when every function has usable examples (run 1 r1 bill.js would otherwise have blamed the tests for a real code bug).
+
+## Replay: nimble as the decider (Ollama decision model, 9B, local)
+
+`tools/replay_decider.py` asks nimble (`ollama pull nimble`, `/v1/systemone`) the past decisions with known answers. It sees what the reviewer saw: the owner's rules, the contract, the tests, the code and the failure. It never sees the facts' verdict or the answer.
+
+**Blame (code / test / contract): 20 of 21 right.**
+- It got all 4 validate_input.js cases right, the ones the facts leave to the reviewer (confidence 0.78–0.93). qwen3:8b got all 4 wrong.
+- It also got the 4 run 1 contract cases right, the ones the facts get wrong (non-value examples, a logic file that needs the page).
+- One miss, a confident one: run 2 r4 bill.js, contract at 0.82 (it's the code: `calculateTotal(100, 0)` gave 0, the example says 100).
+- The order cases: it said code, at low confidence (0.25–0.40).
+- About 8 s per decision on this Mac with nimble the only model loaded (22 s for the first, which loads it).
+
+**Stuck files (try again / it works / simplify / I got it): 7 of 21.**
+- Low confidence on nearly all of them (none wrong at 0.7 or above).
+- It ignored "the first time, try again" even with `times_stuck_before: 0` in front of it. That rule is mechanical and belongs in code, not in a model.
+- "It works" needs someone to check the code by hand, which it can't do from the question text.
+
+**What this says:**
+- Facts first, then nimble for what's left, would have judged all 13 run 2 cases right.
+- Nimble beats qwen3:8b as the reviewer on this set: 20/21 against 13/21 (counting the order cases right for both), and on run 2 alone 12/13 against 5/13.
+- The set is small, and the answers are from my own notes, so this is a promising sign, not proof.
+- Stuck-file triage isn't a job for it as asked. Do the first-time rule in code, and give it the facts it needs (do the examples pass, does the code follow the rules) before asking.
+- On 16 GB, nimble can't stay loaded beside the two qwen models; each swap costs seconds. Fine for the few reviewer calls per round; on the new PC it can stay loaded.
