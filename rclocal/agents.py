@@ -191,7 +191,11 @@ async def plan(sched, stack, idea, conventions, contracts_md, answers, first, ru
         f"{stack.example_returns}, or [58, 57]: a value, never a sentence. The tests check these examples exactly, "
         "so work them out carefully, and make them follow the owner's rules. Write signatures, descriptions and "
         f"examples in {stack.lang_name}, with its own library names. Every input a function needs must be one of "
-        "its arguments."
+        "its arguments: for each feature, first think what the user types or picks for it (a split by percentage "
+        "needs each person's percentage), and make those arguments. Two functions never share the same examples. "
+        "No parameter has the same name as a function the file imports."
+        + (" Logic files never touch the page (no document, window, elements or localStorage): a theme file "
+           "returns the next theme's name, and the page's script applies it." if stack.name == "web" else "")
     )
     if first:
         job = (

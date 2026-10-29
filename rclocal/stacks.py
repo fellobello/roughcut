@@ -174,6 +174,14 @@ class Stack:
         """How the file at `path` imports `other`, where that differs from import_hint. None: it doesn't."""
         return None
 
+    def code_problem(self, code, path):
+        """A problem a linter would catch before the tests run, or "". The builder gets it instead of a test failure."""
+        return ""
+
+    def reexport(self, path, sources):
+        """A file at `path` whose exports are all other files' exports ({name: piece path}), or None if it can't."""
+        return None
+
 
 class Python(Stack):
     name, lang, example = "python", "python", "app/geo.py"
@@ -210,12 +218,17 @@ class Python(Stack):
     def test_hint(self, test_path):
         return f"python3 -m unittest {test_path[:-3].replace('/', '.')}"
 
+    def reexport(self, path, sources):
+        lines = [f"from {self.import_name(piece)} import {name}" for name, piece in sorted(sources.items())]
+        return "\n".join(['"""Everything here is built in its parts; this file passes their work on."""', ""] + lines) + "\n"
+
     def example_ok(self, call, returns):
-        """Whether one example is valid code: a call and a value."""
+        """Whether one example is valid code: a call and a literal value (not `round(115 * 1.0)`)."""
         try:
             compile(f"(({call}), ({returns}))", "<example>", "eval")
+            ast.literal_eval(returns.strip())
             return True
-        except SyntaxError:
+        except (SyntaxError, ValueError, TypeError, MemoryError, RecursionError):
             return False
 
     def example_tests(self, contract, cases=None):
@@ -235,7 +248,7 @@ class Python(Stack):
         lines += [f"        self.assertEqual(_contract.{call}, {returns})" for call, returns in cases]
         return "\n".join(lines) + "\n"
 
-    def repair_test(self, test_code):
+    def repair_test(self, test_code, exports=()):
         """Add the standard import small models often forget. Free, unlike another model call."""
         if "unittest." in test_code and not re.search(r"^\s*import unittest\b", test_code, re.M):
             test_code = "import unittest\n" + test_code
@@ -335,9 +348,13 @@ class Web(Stack):
                 lines.append(f"export const {name} = {example['returns'] if example else 'null'};")
         return "\n".join(lines) + "\n"
 
+    def reexport(self, path, sources):
+        lines = [f"export {{ {name} }} from '{self.import_from(path, piece)}';" for name, piece in sorted(sources.items())]
+        return self.comment(["Everything here is built in its parts; this file passes their work on."]) + "\n".join(lines) + "\n"
+
     def example_ok(self, call, returns):
-        """Whether one example is valid code: a call and a value."""
-        return not self.syntax_error(f"void (({call}), ({returns}));\n", "example.js")
+        """Whether one example is valid code: a call and a literal value (not `Math.round(115 * 1.0)`)."""
+        return js_literal(returns) and not self.syntax_error(f"void (({call}), ({returns}));\n", "example.js")
 
     def example_tests(self, contract, cases=None):
         """The contract's examples as one test, added to the end of the tester's file."""
@@ -353,8 +370,16 @@ class Web(Stack):
         lines += [f"  assert.deepStrictEqual(__contract.{call}, {returns});" for call, returns in cases]
         return "\n".join(lines + ["});"]) + "\n"
 
-    def repair_test(self, test_code):
-        """Add the node:test and node:assert imports small models often forget. Free, unlike another model call."""
+    def repair_test(self, test_code, exports=()):
+        """Fix what small models often get wrong in a test file's imports. Free, unlike another model call.
+
+        The node:test and node:assert imports get added, and a default import of a named
+        export (`import calculateTotal from '../app/x.js'`) becomes a named one.
+        """
+        def named(m):
+            return f"import {{ {m.group(1)} }} from {m.group(2)}" if m.group(1) in exports else m.group(0)
+
+        test_code = re.sub(r"""import\s+([A-Za-z_$][\w$]*)\s+from\s+(['"]\.\./app/[^'"]+['"])""", named, test_code)
         lines = []
         if not re.search(r"""from\s*['"]node:test['"]""", test_code):
             used = [n for n in ("test", "describe", "it", "before", "after", "beforeEach", "afterEach")
@@ -364,7 +389,29 @@ class Web(Stack):
             lines.append("import assert from 'node:assert/strict';")
         return "\n".join(lines + [test_code]) if lines else test_code
 
+    def code_problem(self, code, path):
+        if path.startswith("app/"):
+            touched = sorted(set(DOM_USE.findall(code)))
+            if touched:
+                return (f"{path} is a logic file, so it can't use {', '.join(touched)}: node runs its tests and there is "
+                        "no page there. Take values as arguments and return results; the page's script applies them.")
+        imported = {n.split(" as ")[-1].strip() for group in re.findall(r"import\s*\{([^}]*)\}", code)
+                    for n in group.split(",") if n.strip()}
+        for func, params in re.findall(r"function\s*([A-Za-z_$][\w$]*)?\s*\(([^)]*)\)", code):
+            for param in re.findall(r"[A-Za-z_$][\w$]*(?=\s*(?:=[^,]*)?(?:,|$))", params):
+                if param in imported:
+                    return (f"in {func or 'a function'}, the parameter {param} hides the imported function {param}, "
+                            f"so calling {param}(...) there calls the parameter. Rename the parameter.")
+        return ""
+
     def test_problem(self, test_code):
+        other = sorted(set(OTHER_RUNNERS.findall(test_code)))
+        if other:
+            return (f"the tests use {', '.join(other)}, which node:test and node:assert don't have: use "
+                    "assert.strictEqual, assert.deepStrictEqual and assert.throws(() => f(...), { message: '...' })")
+        if DOM_USE.search(test_code):
+            return ("the tests use the page (document, window or an element), but they run in node: test only what the "
+                    "functions return for the arguments you give them")
         if not re.search(r"""import\s*\{[^}]*\}\s*from\s*['"]node:test['"]""", test_code):
             return "the test file must start with: import { test } from 'node:test';"
         if not re.search(r"""from\s*['"]node:assert(/strict)?['"]""", test_code):
@@ -414,3 +461,55 @@ def stack_for(name):
     if name not in STACKS:
         raise ValueError(f"unknown stack {name!r}; choose from {', '.join(STACKS)}")
     return STACKS[name]
+
+
+JS_TOKEN = re.compile(r"""\s+|(?P<str>'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"|`[^`$]*`)"""
+                      r"|(?P<num>(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)|(?P<word>[A-Za-z_$][\w$]*)|(?P<punct>[\[\]{},:-])")
+DOM_USE = re.compile(r"\b(document|window|localStorage|sessionStorage|classList|querySelector\w*|getElementById|"
+                     r"addEventListener|HTMLElement)\b")
+# What other test runners have and node's doesn't: AVA's t.is and t.throwsAsync, Jest's expect.
+OTHER_RUNNERS = re.compile(r"\b(t\.(?:is|not|throws|throwsAsync|notThrows|deepEqual|truthy|falsy|pass|fail|snapshot)\b|"
+                           r"expect\(|jest\.\w+|chai\b|sinon\b)")
+JS_VALUES = {"true", "false", "null", "undefined", "NaN", "Infinity"}
+
+
+def js_literal(text):
+    """Whether text is a JavaScript literal: numbers, strings, true/false/null, arrays and plain objects of them.
+
+    Names are allowed only as object keys, and minus only before a number, so `[58, 57]` and
+    `{ total: 115 }` pass, while `math.round(115)` and `115 * 0.5` don't.
+    """
+    tokens, pos, text = [], 0, (text or "").strip()
+    if not text:
+        return False
+    while pos < len(text):
+        m = JS_TOKEN.match(text, pos)
+        if not m:
+            return False
+        pos = m.end()
+        kind = m.lastgroup
+        if kind:
+            tokens.append((kind, m.group(kind)))
+    for i, (kind, value) in enumerate(tokens):
+        after = tokens[i + 1] if i + 1 < len(tokens) else (None, None)
+        if kind == "word" and value not in JS_VALUES and after != ("punct", ":"):
+            return False
+        if value == "-" and not (after[0] == "num" or after == ("word", "Infinity")):
+            return False
+    return True
+
+
+def literal_prefix(text):
+    """The value at the start of your words, when you typed more than a value: "[58, 57] (or [57, 58])" -> "[58, 57]"."""
+    text = (text or "").strip()
+    opener = {"[": "]", "{": "}"}.get(text[:1])
+    if opener:
+        depth = 0
+        for i, ch in enumerate(text):
+            depth += ch == text[0]
+            depth -= ch == opener
+            if depth == 0:
+                return text[: i + 1]
+        return ""
+    m = re.match(r"""-?(?:\d+\.?\d*|\.\d+)|'[^']*'|"[^"]*"|true\b|false\b|null\b|undefined\b|None\b|True\b|False\b""", text)
+    return m.group(0) if m else ""

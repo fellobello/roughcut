@@ -74,3 +74,41 @@ def repair(html, check):
             html = fixed
             done.append("replaced example numbers in the results with —")
     return html, "; ".join(done)
+
+
+MODULE_SCRIPT = re.compile(r"<script[^>]*type=[\"']module[\"'][^>]*>(.*?)</script>", re.S | re.I)
+BY_ID = re.compile(r"""getElementById\(\s*['"]([^'"]+)['"]\s*\)""")
+BY_SELECTOR = re.compile(r"""querySelector(?:All)?\(\s*(['"`])(.+?)\1\s*\)""")
+
+
+def missing_targets(html):
+    """What the page script looks up that the markup doesn't have, like "#total" or "[aria-pressed=\\"false\\"]".
+
+    Only the simple selectors a page uses are checked (an id, a class, an attribute, a tag
+    with one of those); anything else, or anything with ${...} in it, is taken on trust.
+    """
+    scripts = MODULE_SCRIPT.findall(html)
+    markup = MODULE_SCRIPT.sub("", html)
+    code = re.sub(r"/\*.*?\*/|(?<![:'\"])//[^\n]*", "", "\n".join(scripts), flags=re.S)  # comments don't count
+    ids = set(re.findall(r"""\sid=["']([^"']+)["']""", markup))
+    classes = {c for group in re.findall(r"""\sclass=["']([^"']*)["']""", markup) for c in group.split()}
+    missing = [f"#{i}" for i in BY_ID.findall(code) if i not in ids]
+    for _, selector in BY_SELECTOR.findall(code):
+        if "${" in selector or "," in selector or " " in selector.strip() or ">" in selector:
+            continue
+        m = re.fullmatch(r"([a-zA-Z][\w-]*)?(?:#([\w-]+)|\.([\w-]+)|\[([\w-]+)(?:\s*=\s*[\"']?([^\"'\]]*)[\"']?)?\])", selector.strip())
+        if not m:
+            continue
+        tag, id_, cls, attr, value = m.groups()
+        if id_ is not None:
+            ok = id_ in ids
+        elif cls is not None:
+            ok = cls in classes
+        else:
+            any_tag = r"[a-zA-Z][\w-]*"
+            pattern = rf"""<{tag or any_tag}\b[^>]*\s{re.escape(attr)}""" + (
+                rf"""\s*=\s*["']{re.escape(value)}["']""" if value is not None else r"""\b""")
+            ok = re.search(pattern, markup) is not None
+        if not ok:
+            missing.append(selector.strip())
+    return list(dict.fromkeys(missing))

@@ -1309,6 +1309,43 @@ class FindingsTest(unittest.TestCase):
         self.assertEqual(out["out_of_scope"], ["Printable receipt option"])
         self.assertEqual(out["must_have"], ["No account or server required"])  # itself a no: kept
 
+    def test_examples_must_be_values(self):
+        from rclocal.stacks import literal_prefix
+
+        web, py = STACKS["web"], STACKS["python"]
+        self.assertTrue(web.example_ok("splitBill(115, 2)", "[58, 57]"))
+        self.assertTrue(web.example_ok("f()", "{ total: 115, shares: [58, 57] }"))
+        self.assertFalse(web.example_ok("calculateTotal(100, 15)", "math.round(100 * 1.15)"))
+        self.assertFalse(web.example_ok("splitBill(115, 2, true)", "[115 * 0.5, 115 * 0.5]"))
+        self.assertFalse(py.example_ok("total(100, 15)", "round(100 * 1.15)"))
+        self.assertEqual(literal_prefix("[58, 57] (whole dollars; [57, 58] is fine too)"), "[58, 57]")
+
+    def test_logic_files_and_their_tests_stay_off_the_page(self):
+        web = STACKS["web"]
+        self.assertIn("logic file", web.code_problem("export function toggle(el) { el.classList.toggle('dark'); }", "app/theme.js"))
+        self.assertEqual(web.code_problem("export function next(theme) { return theme === 'dark' ? 'light' : 'dark'; }", "app/theme.js"), "")
+        self.assertIn("run in node", web.test_problem("import { test } from 'node:test';\nconst el = document.body;"))
+
+    def test_the_page_check_names_what_the_script_cant_find(self):
+        html = ('<main><button aria-pressed="true">A</button><button>B</button><p id="out"></p></main>'
+                '<script type="module">document.getElementById("out"); document.getElementById("total");'
+                "document.querySelector('button[aria-pressed=\"false\"]'); // getElementById('in a comment')\n</script>")
+        self.assertEqual(pages.missing_targets(html), ["#total", 'button[aria-pressed="false"]'])
+
+    def test_test_files_are_held_to_nodes_own_runner(self):
+        web = STACKS["web"]
+        fixed = web.repair_test("import calculateTotal from '../app/x.js';\ntest('a', () => {});", ["calculateTotal"])
+        self.assertIn("import { calculateTotal } from '../app/x.js';", fixed)
+        self.assertIn("t.throwsAsync", web.test_problem(
+            "import { test } from 'node:test';\nimport assert from 'node:assert';\ntest('a', async (t) => { await t.throwsAsync(f); });"))
+
+    def test_a_split_file_passes_its_parts_on(self):
+        web = STACKS["web"]
+        shim = web.reexport("app/bill.js", {"splitBill": "app/bill_parts/split_bill.js"})
+        self.assertIn("export { splitBill } from './bill_parts/split_bill.js';", shim)
+        self.assertEqual(web.syntax_error(shim, "app/bill.js"), "")
+
+
 class FailureDigestTest(unittest.TestCase):
     def test_the_values_are_kept_and_the_stack_frames_dropped(self):
         from rclocal.rounds import failure_digest
