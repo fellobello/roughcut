@@ -95,10 +95,13 @@ textarea { resize: vertical; min-height: 64px; }
 .opt.pick { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 .opt.pick::before { content: "★ "; font-size: 11px; }
 .opt[data-detail]:hover::after, .opt[data-detail]:focus-visible::after {
-  content: attr(data-detail); position: absolute; right: 0; top: calc(100% + 6px); width: max-content; max-width: 280px;
+  content: attr(data-detail); position: absolute; right: 0; bottom: calc(100% + 6px); width: max-content; max-width: 280px;
   background: var(--tip); color: var(--tip-ink); padding: 8px 10px; border-radius: 8px; font-weight: 400; font-size: 13px;
   line-height: 1.4; z-index: 20; box-shadow: 0 6px 20px rgb(0 0 0 / 20%); white-space: normal; pointer-events: none; }
 .answered { color: var(--ok); font-weight: 600; }
+.waiting { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 30; background: var(--accent);
+  color: var(--accent-ink); border: 0; border-radius: 999px; padding: 9px 18px; font-weight: 600; cursor: pointer;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 25%); }
 .steps { display: flex; gap: 6px; align-items: center; margin-top: 12px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line); }
 .dot.on { background: var(--accent); }
@@ -317,6 +320,7 @@ h1 { letter-spacing: .02em; } h2, .msg .who, th { letter-spacing: .14em; }
   </section>
   <section><h2>Now</h2><div id="now" class="muted" style="font-size:13px">Nothing running.</div></section>
 </aside>
+<button class="waiting" id="waiting" hidden></button>
 </div>
 
 
@@ -325,7 +329,7 @@ const TOKEN = "__TOKEN__";
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const gb = b => (b / 2 ** 30).toFixed(1) + " GB";
-let state = null, modelsLoaded = false, lastChat = -1, qIndex = 0;
+let state = null, modelsLoaded = false, lastChat = -1, qIndex = 0, qId = null, activeTab = "talk";
 const drawn = {};
 // Redraw a section only when its data changed, so typing in it isn't wiped.
 const changed = (key, data) => { const j = JSON.stringify(data); if (drawn[key] === j) return false; drawn[key] = j; return true; };
@@ -351,6 +355,7 @@ function side(which, open) {
 
 document.querySelectorAll(".tab").forEach(t => t.onclick = () => showTab(t.dataset.tab));
 function showTab(name) {
+  activeTab = name;
   document.querySelectorAll(".tab").forEach(x => x.classList.toggle("on", x.dataset.tab === name));
   document.querySelectorAll(".panel").forEach(p => p.classList.toggle("on", p.id === name));
   if (name === "models") loadModels();
@@ -489,8 +494,9 @@ function asking(s) {
     q = { kind: "talk", id: p.index, text: p.question.text, why: p.question.why, options: p.question.options,
           details: p.question.details || {}, pick: p.question.default, count: `Question ${s.pending.length - open.length + 1} of ${s.pending.length}` };
   } else if (qs.length) {
-    qIndex = Math.min(qIndex, qs.length - 1);
-    const r = qs[qIndex];
+    const at = qs.findIndex(x => x.id === qId);  // stay on the question you're looking at while new ones come in
+    qIndex = at >= 0 ? at : Math.min(qIndex, qs.length - 1);
+    const r = qs[qIndex]; qId = r.id;
     q = { kind: "build", id: r.id, text: r.text, why: r.why, options: [...new Set([r.choice, ...r.options].filter(Boolean))],
           details: r.details || {}, pick: r.choice, count: `From the build · ${qIndex + 1} of ${qs.length}`, many: qs.length > 1 };
   }
@@ -504,10 +510,32 @@ function asking(s) {
       <div class="row"><input class="input" style="flex:1" placeholder="Or your own answer" data-own><button class="btn" data-ownbtn>Answer</button></div></div>`;
   wireAsk($("asking"), (id, value, isPick) => q.kind === "talk" ? post("answer", { index: id, reply: value })
     : post("question", isPick && q.pick ? { id, keep: true } : { id, text: value }));
-  $("asking").querySelectorAll("[data-nav]").forEach(b => b.onclick = () => { qIndex += Number(b.dataset.nav); drawn.asking = ""; asking(state); });
+  $("asking").querySelectorAll("[data-nav]").forEach(b => b.onclick = () => {
+    qIndex += Number(b.dataset.nav); qId = qs[qIndex] && qs[qIndex].id; drawn.asking = ""; asking(state); });
+  const wrong = $("asking").querySelector('.opt[data-value="Wrong"]');
+  if (wrong && q.options.includes("Right")) {  // an example check: wrong asks what it should be
+    wrong.onclick = () => {
+      const own = $("asking").querySelector("[data-own]");
+      own.placeholder = "What should it return? Like [58, 57]"; own.focus();
+      if (!$("asking").querySelector("[data-drop]")) {
+        const drop = document.createElement("button");
+        drop.className = "btn"; drop.dataset.drop = "1"; drop.textContent = "Just drop it";
+        drop.onclick = () => post("question", { id: q.id, text: "Wrong" });
+        own.parentNode.append(drop);
+      }
+    };
+  }
   $("chatbox").scrollTop = $("chatbox").scrollHeight;
 }
 
+
+// Questions wait in Talk; on any other tab, say so.
+function waitingNote(s) {
+  const n = s.pending.filter(p => p.answer === null).length + s.questions.length;
+  $("waiting").hidden = !n || activeTab === "talk";
+  $("waiting").textContent = n === 1 ? "A question is waiting in Talk" : `${n} questions are waiting in Talk`;
+}
+$("waiting").onclick = () => showTab("talk");
 
 function cycle(s) {
   const keys = s.stages.map(x => x.key);
@@ -640,7 +668,7 @@ async function refresh() {
   state = s;
   try {
     $("where").textContent = s.project ? `${s.project.name} · ${s.project.path}` : "No project open";
-    chips(s); projectList(s); talk(s); asking(s); buildPanel(s); appPanel(s); cycle(s);
+    chips(s); projectList(s); talk(s); asking(s); buildPanel(s); appPanel(s); cycle(s); waitingNote(s);
     const where = s.project && s.project.path;
     if (where !== treeFor && treeFor !== null && ed.path) closeFile();  // another project: its files aren't this one's
     if (where !== treeFor || (wasBusy && !s.busy)) { treeFor = where; loadTree(); }  // new project, or a build just ended
