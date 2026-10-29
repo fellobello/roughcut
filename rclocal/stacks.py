@@ -182,6 +182,14 @@ class Stack:
         """A file at `path` whose exports are all other files' exports ({name: piece path}), or None if it can't."""
         return None
 
+    def definitions(self, code):
+        """The functions and classes a file defines itself (not ones it imports and passes on)."""
+        return set()
+
+    def share(self, code, name, path, keeper):
+        """`code` (the file at `path`) without its own `name`, importing it from `keeper` instead; None if it can't."""
+        return None
+
 
 class Python(Stack):
     name, lang, example = "python", "python", "app/geo.py"
@@ -267,6 +275,27 @@ class Python(Stack):
             elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
                 names.add(node.target.id)
         return names
+
+    def definitions(self, code):
+        return {n.name for n in ast.parse(code).body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
+
+    def share(self, code, name, path, keeper):
+        body = ast.parse(code).body
+        node = next((n for n in body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                     and n.name == name), None)
+        if node is None:
+            return None
+        start = min([node.lineno] + [d.lineno for d in node.decorator_list]) - 1
+        head = 0  # after the docstring and the imports at the top
+        for n in body:
+            if not (isinstance(n, (ast.Import, ast.ImportFrom)) or (isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant))):
+                break
+            head = n.end_lineno
+        if head > start:
+            return None
+        lines = code.splitlines(keepends=True)
+        kept = lines[:head] + [f"from {self.import_name(keeper)} import {name}\n"] + lines[head:start] + lines[node.end_lineno:]
+        return "".join(kept)
 
     def syntax_error(self, code, path):
         try:
@@ -418,6 +447,23 @@ class Web(Stack):
             return "the test file must import assert from 'node:assert'"
         return ""
 
+    def definitions(self, code):
+        return set(re.findall(r"^export\s+(?:async\s+)?(?:function\s*\*?|class)\s*([A-Za-z_$][\w$]*)", code, re.M))
+
+    def share(self, code, name, path, keeper):
+        found = re.search(rf"^export\s+(?:async\s+)?(?:function\s*\*?|class)\s*{re.escape(name)}\b", code, re.M)
+        if not found:
+            return None
+        body = code.find("{", _close(code, code.find("(", found.end())) if "function" in found.group(0) else found.end())
+        end = _close(code, body)
+        if body < 0 or end < 0:
+            return None
+        end += code[end:].startswith("\n")
+        imports = [m.end() for m in re.finditer(r"^import\b[^;]*;[ \t]*\n?", code[: found.start()], re.M)]
+        head = imports[-1] if imports else 0
+        line = f"import {{ {name} }} from '{self.import_from(path, keeper)}';\nexport {{ {name} }};\n"
+        return code[:head] + line + code[head: found.start()] + code[end:]
+
     def defined_names(self, code):
         names = set(re.findall(r"export\s+(?:async\s+)?(?:function\*?|class|const|let|var)\s+([A-Za-z_$][\w$]*)", code))
         for group in re.findall(r"export\s*\{([^}]*)\}", code):
@@ -513,3 +559,34 @@ def literal_prefix(text):
         return ""
     m = re.match(r"""-?(?:\d+\.?\d*|\.\d+)|'[^']*'|"[^"]*"|true\b|false\b|null\b|undefined\b|None\b|True\b|False\b""", text)
     return m.group(0) if m else ""
+
+
+def _close(code, start):
+    """The index just past the bracket that closes the one at `start` in JavaScript, skipping strings and comments; -1 if none."""
+    if start < 0 or start >= len(code):
+        return -1
+    pairs = {"(": ")", "{": "}", "[": "]"}
+    depth, i = [], start
+    while i < len(code):
+        ch = code[i]
+        if ch in "'\"`":
+            i += 1
+            while i < len(code) and code[i] != ch:
+                i += 2 if code[i] == "\\" else 1
+        elif code.startswith("//", i):
+            i = code.find("\n", i)
+            if i < 0:
+                return -1
+        elif code.startswith("/*", i):
+            i = code.find("*/", i)
+            if i < 0:
+                return -1
+            i += 1
+        elif ch in pairs:
+            depth.append(pairs[ch])
+        elif depth and ch == depth[-1]:
+            depth.pop()
+            if not depth:
+                return i + 1
+        i += 1
+    return -1

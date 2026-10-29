@@ -192,6 +192,7 @@ class Round:
 
         self.events.emit("phase", name="build")
         await self.build_pass(idea)
+        await self.share_duplicates()
         if self.recheck_page():
             await self.build_pass(idea)
 
@@ -753,6 +754,55 @@ class Round:
         if not code:
             return "failed", "the agent never wrote a usable file", None
         return await self.after_failure(task, contract, code, failure)
+
+    async def share_duplicates(self):
+        """A function two logic files both define: one copy goes, and that file imports it from the other.
+
+        Small models rewrite a function another file already has (a split piece, say), and two
+        copies drift apart. The copy is only dropped when its file's tests still pass without it.
+        """
+        hub, stack = self.hub, self.stack
+        contracts = {c["path"]: c for c in hub.contracts.all()}
+        defined = {}
+        for path in contracts:
+            file = hub.project / path
+            if not file.exists() or self.is_placeholder(path):
+                continue
+            try:
+                names = stack.definitions(file.read_text(encoding="utf-8"))
+            except SyntaxError:
+                continue
+            for name in names:
+                defined.setdefault(name, []).append(path)
+        for name, paths in sorted(defined.items()):
+            if len(paths) < 2:
+                continue
+            # Keep the copy in a file of its own (not a split piece) that doesn't import the others.
+            keeper = min(paths, key=lambda p: (bool(contracts[p].get("split_from")),
+                                               any(q in contracts[p]["imports"] for q in paths), p))
+            for path in paths:
+                if path == keeper or keeper in hub.contracts.dependents(path):
+                    continue  # importing from a file that imports this one would go round in a circle
+                await self.share_one(name, path, keeper, contracts[path])
+
+    async def share_one(self, name, path, keeper, contract):
+        file = self.hub.project / path
+        before = file.read_text(encoding="utf-8")
+        after = self.stack.share(before, name, path, keeper)
+        if not after or self.stack.syntax_error(after, path):
+            self.events.emit("note", text=f"{name} is defined in both {keeper} and {path}; couldn't take it out of {path}")
+            return
+        self.hub._write_text(file, after)
+        passed, _ = await self.runner.run(contract["test_path"])
+        if not passed:
+            self.hub._write_text(file, before)
+            self.events.emit("note", text=f"{name} is defined in both {keeper} and {path}; {path}'s tests fail with "
+                                          f"{keeper}'s, so both copies stay")
+            return
+        self.hub.contracts.set_imports(path, contract["imports"] + [keeper], self.number,
+                                       f"uses {name} from {keeper} instead of its own copy")
+        contract["imports"] = sorted(set(contract["imports"] + [keeper]))
+        self.events.emit("note", text=f"{name} was defined in both {keeper} and {path}: {path} now imports it from {keeper}")
 
     def pass_on(self, contract):
         """For a file split into parts that export everything it promises under the same names: the file that re-exports them."""

@@ -88,6 +88,10 @@ for you, **It works** counts it as done as it is: the tests it fails don't hold 
 
 **Nothing stops to ask you.** Like the Claude version, a run guesses and keeps going.
 
+**One function, one file.** After each build, a function two logic files both define is
+taken out of one of them, which then imports it from the other, as long as that file's
+tests still pass without its own copy.
+
 **A file the builder keeps getting wrong is split.** After two failed attempts where the
 reviewer blames the code (or the same tests failing the same way twice), the planner breaks
 the file into 2 to 4 smaller files in a folder next to it (`app/board_parts/neighbors.js`),

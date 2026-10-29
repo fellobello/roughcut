@@ -1444,6 +1444,38 @@ class BlameTest(unittest.TestCase):
         self.assertEqual(failed_tests("FAIL: test_x (tests.test_app_a.ATest.test_x)\n"), ["test_x (tests.test_app_a.ATest.test_x)"])
 
 
+class SharedFunctionTest(HubCase):
+    """A function two files both define: one copy goes, if the tests still pass."""
+
+    def test_a_copied_function_is_imported_from_the_file_that_has_it(self):
+        rnd = Round(self.hub, FakeLLM(None))
+        rnd.number = 0
+        piece = {"path": "app/parts.py", "purpose": "Parts", "imports": [],
+                 "exports": [export("to_celsius", "def to_celsius(f: float) -> float"), export("half", "def half(x: float) -> float")]}
+        rnd.apply_plan(plan_of([CONVERT, piece]))
+        self.hub._write_text(self.project / "app/convert.py", CONVERT_GOOD)
+        self.hub._write_text(self.project / "app/parts.py", CONVERT_GOOD + "\n\ndef half(x: float) -> float:\n    return x / 2\n")
+        self.hub._write_text(self.project / "tests/test_app_parts.py", "import unittest\nfrom app.parts import to_celsius, half\n\n"
+                             "class T(unittest.TestCase):\n    def test_it(self):\n        self.assertEqual(half(to_celsius(212)), 50)\n")
+        rnd.write_packages()
+        asyncio.run(rnd.share_duplicates())
+        parts = (self.project / "app/parts.py").read_text()
+        self.assertIn("from app.convert import to_celsius", parts)
+        self.assertNotIn("def to_celsius", parts)
+        self.assertIn("app/convert.py", self.hub.contracts.get("app/parts.py")["imports"])
+        self.assertIn("def to_celsius", (self.project / "app/convert.py").read_text())
+
+    def test_web_files_share_a_function_the_same_way(self):
+        web = STACKS["web"]
+        code = ("import { a } from './a.js';\n\nexport function tipFor(bill, pct = { x: 1 }) {\n  const s = '}';\n"
+                "  return bill * pct / 100;\n}\n\nexport function other() { return 1; }\n")
+        shared = web.share(code, "tipFor", "app/parts/x.js", "app/tip.js")
+        self.assertIn("import { tipFor } from '../tip.js';\nexport { tipFor };", shared)
+        self.assertNotIn("function tipFor", shared)
+        self.assertIn("export function other()", shared)
+        self.assertEqual(web.definitions(shared), {"other"})
+
+
 class FailureDigestTest(unittest.TestCase):
     def test_the_values_are_kept_and_the_stack_frames_dropped(self):
         from rclocal.rounds import failure_digest
