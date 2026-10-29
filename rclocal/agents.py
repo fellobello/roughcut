@@ -179,7 +179,7 @@ async def checklist(sched, must_have):
     return await sched.ask("planner", _chat(system, user), "checklist", reply="checklist")
 
 
-async def user_verdict(sched, persona, brief, transcript, facts):
+async def user_verdict(sched, persona, brief, transcript, facts, must_have=()):
     """What a test user thought of the app after trying it. Returns USER_VERDICT data."""
     system = (
         f"{_persona(persona)} Below is what happened when you tried it. Did it do what you wanted? List the problems "
@@ -189,9 +189,12 @@ async def user_verdict(sched, persona, brief, transcript, facts):
         "out again yourself; if your own "
         "expectation was the mistake, it isn't a problem. where is 'logic' when a calculated result is wrong and "
         "'page' for everything else. severity is 'high' only when the app fails at its main job. In wish, one thing "
-        f"you'd like it to do, or an empty string. {JSON_ONLY}"
+        "you'd like it to do, or an empty string. In checklist, go through every must-have listed, copy it into item "
+        "exactly, and set there to true only if you saw it on the page or used it; something you looked for and "
+        f"couldn't find is false. {JSON_ONLY}"
     )
-    user = _section("What the app is for", brief) + _section("What happened", transcript) + _section("Checked automatically", facts)
+    user = (_section("What the app is for", brief) + _section("Must-haves to tick off", "\n".join(f"- {m}" for m in must_have))
+            + _section("What happened", transcript) + _section("Checked automatically", facts))
     return await sched.ask("user", _chat(system, user), f"user:{persona['key']}:verdict", reply="user_verdict")
 
 

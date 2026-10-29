@@ -20,8 +20,9 @@ import asyncio
 import json
 import re
 
-from . import agents
+from . import agents, project
 from .hub_local import HUB_OWNER
+from .likeness import same_text
 from .llm import LLMError
 
 PERSONAS = [
@@ -118,6 +119,8 @@ class TestUsers:
         if not count or not inventory or not inventory.get("controls"):
             return []
         controls = describe_controls(inventory)
+        saved = project.load_brief(self.hub)
+        self.must_have = saved["must_have"] if saved else []
         results = await asyncio.gather(*(self.one(p, brief, controls) for p in PERSONAS[:count]))
         results = [r for r in results if r]
         self.record(results)
@@ -137,10 +140,11 @@ class TestUsers:
             return None  # no Chrome: nothing was tried, so nothing to judge
         facts = browser_facts(report)
         try:
-            verdict = await agents.user_verdict(sched, persona, brief, describe_run(report), "\n".join(facts) or "nothing")
+            verdict = await agents.user_verdict(sched, persona, brief, describe_run(report), "\n".join(facts) or "nothing",
+                                                self.must_have)
         except LLMError as e:
             self.events.emit("note", text=f"test user {persona['name']} gave no verdict: {e}")
-            verdict = {"works": not facts, "problems": [], "wish": ""}
+            verdict = {"works": not facts, "problems": [], "wish": "", "checklist": []}
         # A control the user made up isn't a broken page; everything else the browser saw is.
         problems = [{"what": f, "severity": "low" if f.startswith(MISSING) else "high", "where": "page", "seen": True}
                     for f in facts]
@@ -151,18 +155,36 @@ class TestUsers:
         return {
             "persona": persona["name"], "key": persona["key"], "goal": plan["goal"], "works": works,
             "problems": problems, "wish": verdict["wish"].strip(), "run": describe_run(report),
+            "missing": self.ticked_off(verdict["checklist"]),
             "screenshot": str(shot) if shot.exists() else None,
         }
+
+    def ticked_off(self, checklist):
+        """The must-haves this user didn't find, matched back to the brief's own words."""
+        missing = []
+        for item in self.must_have:
+            said = next((c for c in checklist if c["item"].strip().lower() == item.strip().lower()), None) or next(
+                (c for c in checklist if same_text(c["item"], item)), None)
+            if said is not None and not said["there"]:
+                missing.append(item)
+        return missing
+
+    def unfound(self, results):
+        """Must-haves most of the test users couldn't find: [(item, how many missed it)]."""
+        counts = [(item, sum(item in r.get("missing", []) for r in results)) for item in self.must_have]
+        return [(item, n) for item, n in counts if n * 2 > len(results)]
 
     def record(self, results):
         """Write the round's report, send page problems to the designer and ask you about the rest."""
         hub, n = self.hub, self.round.number
         history = self.history()
-        history.append({"round": n, "results": [{k: r[k] for k in ("persona", "works", "problems", "wish")} for r in results]})
+        history.append({"round": n, "results": [{k: r.get(k) for k in ("persona", "works", "problems", "wish", "missing")}
+                                                for r in results]})
         hub._write_text(self.history_path, json.dumps(history, indent=2) + "\n")
         hub._write_text(hub.root / "rounds" / f"{n}.users.md", self.render(results))
         page = [f"{r['persona']}: {p['what']}" for r in results for p in r["problems"]
                 if p["where"] == "page" and p["severity"] == "high"]
+        page = [f"must-have {item!r}: {n} of {len(results)} test users couldn't find it" for item, n in self.unfound(results)] + page
         fixes_used = sum(1 for h in history[:-1] if h.get("sent_back"))
         from .rounds import DESIGN_TASK
 
@@ -198,6 +220,8 @@ class TestUsers:
                     f"- **{p['severity']}** ({p['where']}{', seen by the browser' if p.get('seen') else ''}): {p['what']}"
                     for p in r["problems"]
                 ] + [""]
+            if r.get("missing"):
+                out += ["Must-haves they couldn't find:", ""] + [f"- {m}" for m in r["missing"]] + [""]
             if r["wish"]:
                 out += [f"Wish: {r['wish']}", ""]
             if r["screenshot"]:

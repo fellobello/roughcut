@@ -895,8 +895,10 @@ class TestUsersTest(HubCase):
         if "Checker:" in system:
             return {"checks": [{"item": "Split by percentage", "seen_as": "control", "words": ["percent"]},
                                {"item": "Rounds to whole dollars", "seen_as": "not_on_page", "words": []}]}
+        found = "Riley" in system  # only one of the three finds the percentage split
         return {"works": False, "wish": "a share button",
-                "problems": [{"what": "each share is the whole bill", "severity": "high", "where": "logic"}]}
+                "problems": [{"what": "each share is the whole bill", "severity": "high", "where": "logic"}],
+                "checklist": [{"item": "Split by percentage", "there": found}, {"item": "Rounds to whole dollars", "there": True}]}
 
     def users(self, plan=True):
         rnd = Round(self.hub, FakeLLM(self.respond))
@@ -912,6 +914,15 @@ class TestUsersTest(HubCase):
 
         rnd.runner.try_as_user = fake_try
         return TestUsers(rnd)
+
+    def test_must_haves_most_test_users_cant_find_send_the_page_back(self):
+        project.save_brief(self.hub, {**BRAINSTORM_REPLY["brief"], "look": "light and calm",
+                                      "must_have": ["Split by percentage", "Rounds to whole dollars"]})
+        users = self.users()
+        results = asyncio.run(users.run("Split a bill", self.INVENTORY))
+        self.assertEqual(sum("Split by percentage" in r["missing"] for r in results), 2)
+        self.assertTrue(any("must-have 'Split by percentage': 2 of 3" in n for n in self.hub.task(DESIGN_TASK)["notes"]))
+        self.assertIn("Must-haves they couldn't find", (self.hub.root / "rounds" / "0.users.md").read_text())
 
     def test_the_page_check_sends_back_a_page_without_a_must_have(self):
         project.save_brief(self.hub, {**BRAINSTORM_REPLY["brief"], "look": "light and calm",

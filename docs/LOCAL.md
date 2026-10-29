@@ -226,8 +226,9 @@ they'd expect, and the steps happen for real in headless Chrome. Sam is in a hur
 phone-sized screen, Riley checks the numbers by hand, Alex tries empty, zero, negative and
 silly input. What the browser sees for itself (a thrown error, `NaN` on screen, a control
 that isn't there) counts without asking a model. Page problems send the page back (at most
-`user_fixes` times per project); a result a user thinks is wrong becomes a question for you,
-since a test user can be wrong too. Each round's reports and screenshots are in
+`user_fixes` times per project), and so does a must-have that most of them couldn't find:
+each ticks off the brief's must-haves after trying the page. A result a user thinks is wrong
+becomes a question for you, since a test user can be wrong too. Each round's reports and screenshots are in
 `.hub/rounds/<n>.users.md` and `.hub/screens/`.
 
 The builder becomes an agent because the round gives it five actions and a loop, and
