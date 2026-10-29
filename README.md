@@ -8,16 +8,14 @@ There are two ways to run it:
 
 | | [Roughcut Local](docs/LOCAL.md) (Ollama) | [Roughcut for Claude Code](plugin/README.md) (plugin) |
 | --- | --- | --- |
-| Models | Local [Ollama](https://ollama.com) models only: no API keys, no plan usage | Claude, through Claude Code |
-| Best for | Small browser apps and Python tools, overnight runs on a laptop | Bigger projects, anything Claude can build |
+| Models | Local [Ollama](https://ollama.com) models only: no API keys, no plan usage | Claude |
+| Best for | Small browser apps and Python tools | Complex projects |
 | How you use it | The studio, a page in your browser, or the `roughcut-local` command | `/roughcut:build`, `/roughcut:answer` in Claude Code |
-| Speed | Slower (the demo bill splitter took about 25 minutes on a 16 GB Mac), free to run | Fast, but uses your Claude usage |
-
-> Status: early. The plugin has run one full round on a real idea; see the example below. Roughcut Local builds small apps end to end, but the small models still get stuck on harder logic; those files are left for you to finish, with a note on what they need.
+| Speed | Slower (the demo bill splitter took about 25 minutes on a 16 GB Mac), free to run | Fast, but uses your Claude token allowance |
 
 ## Example
 
-[alpr-route-planner](https://github.com/fellobello/alpr-route-planner) came from one line: "google maps but you can see flock cameras and plan routes around them." Roughcut's first round planned it as 6 modules, built them with acceptance tests in parallel, and merged them into a working web app with 591 passing tests, then handed back 11 big guesses to confirm. Its `.hub/` folder holds the whole plan, every task and every decision.
+[alpr-route-planner](https://github.com/fellobello/alpr-route-planner) came from one line: "google maps but you can see flock cameras and plan routes around them." Roughcut's first round planned it as 6 modules, built them with acceptance tests in parallel, and merged them into a working web app. Its `.hub/` folder holds the whole plan, every task and every decision.
 
 ## How a round works
 
@@ -43,12 +41,10 @@ There are two ways to run it:
    └──────────┘
 ```
 
-- **Round 0 never asks you anything.** Big choices (language, storage, outside services) get a sensible default and go at the top of `QUESTIONS.md` as guesses to confirm.
 - **Interfaces come first.** The planner writes them as real code before any builder starts, so modules can be built at the same time without guessing about each other.
 - **Tests come from the spec, not the code.** Each module gets a separate test task, written by an agent that never reads that module's implementation.
 - **Agents don't wait on each other.** They talk through files in `.hub/`, written only by `plugin/scripts/hub.py`, which locks every change.
-- **Changing an answer rebuilds only what depends on it.**
-- **Code only.** Images, icons and other assets are placeholders.
+- **Code only.** Images, icons and other assets are built as placeholders.
 
 ## Roughcut Local in two minutes
 
@@ -62,15 +58,7 @@ ollama pull qwen3:8b && ollama pull qwen2.5-coder:7b
 ./roughcut-local studio
 ```
 
-That opens the studio at http://127.0.0.1:8770. Start a new project from an idea, talk it through with the brainstormer (it pushes back and asks a few questions, each with options), press Build, and watch the rounds. Answer what the models guessed in the Questions tab, try the app in the App tab, and pick a model per role in the Models tab.
-
-What's different from the plugin, briefly:
-
-- **One file per task.** Small models do well with one file and badly with a whole project, so every agent sees one file's contract and nothing more.
-- **Brainstorm first.** Before anything is built, the idea is talked through and kept as a brief in `PROJECT.md`, which is updated every round so a project can be picked up months later.
-- **Test users.** Three simulated people try each finished page in a real browser and report what's wrong, independently of the tests.
-- **A safety box.** Model-written code is scanned before it runs, then runs in a macOS sandbox with no internet and no access outside the project.
-- **A trial bench.** `roughcut-local trial --role designer` scores models on a role's task, so you can pick the best balance of speed and quality for your machine.
+That opens the studio at localhost:8770. Start a new project from an idea, talk it through with the brainstormer (it pushes back and asks a few questions, each with options), press Build, and watch the rounds. Answer what the models asked in the Questions tab, try the app in the App tab, and monitor or pick a model per role in the Models tab.
 
 [docs/LOCAL.md](docs/LOCAL.md) has everything else: every command, the roles, where things live, and the safety box in detail.
 
@@ -102,7 +90,7 @@ claude plugin install roughcut@roughcut
 | `/roughcut:answer [folder]` | Goes through the questions with you, then runs the next round |
 | `/roughcut:status [folder]` | Shows the round, what's built, and what needs you |
 
-Each round counts toward your Claude usage, and a round can use a lot: the first real one, a 12-task map app, took about 3 million tokens. The workflow asks before it starts, you can stop it from `/workflows`, and it runs at most 4 tasks at a time. If a round stops early, for example at a usage limit, finished work is kept and the next `/roughcut:answer` picks up where it stopped.
+Each round counts toward your Claude usage, and a round can use a lot: the first real one, a 12-task map app, took about 3 million tokens. There is room for lots of improvement here. The workflow asks before it starts, you can stop it from `/workflows`, and it runs at most 4 tasks at a time, to make management doable as code comes in. If a round stops early, for example at a usage limit, finished work is kept and the next `/roughcut:answer` picks up where it stopped.
 
 ### Usage numbers in reports (optional)
 
