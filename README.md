@@ -1,6 +1,6 @@
 # Roughcut
 
-Turns a software idea into a working sample, a round at a time, on local Ollama models or with Claude.
+An LLM harness to transform ideas into testable products with Ollama or Claude using an async swarm of agents.
 
 You give it an idea in a sentence or two, the way you'd write it in a notebook. Agents plan it, build the pieces in parallel, test them, and then stop with a short list of questions. You answer, and the next round builds on your answers. You decide when it's done.
 
