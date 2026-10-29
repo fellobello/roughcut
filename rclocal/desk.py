@@ -186,7 +186,11 @@ class Desk:
         brief = reply["brief"]
         lines = [f"{brief['name']}: {brief['pitch']}"] + [f"• {p}" for p in reply["pushback"]]
         if self.ready and not self.pending:
-            lines.append("The brief looks clear to me. Press Build when you're ready, or tell me more.")
+            for label, key in (("Must have", "must_have"), ("Nice to have", "nice_to_have"),
+                               ("Leaving out", "out_of_scope"), ("Rules", "rules")):
+                if brief.get(key):
+                    lines.append(f"{label}: {'; '.join(brief[key])}")
+            lines.append("The brief looks clear to me. Press Build when you're ready, or tell me what to change.")
         self.post("brainstormer", "\n".join(lines), questions=[i["question"] for i in self.pending])
         return None
 

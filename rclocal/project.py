@@ -90,6 +90,7 @@ def brief_markdown(brief):
     out += items("Must have", brief["must_have"])
     out += items("Nice to have", brief["nice_to_have"])
     out += items("Left out", brief["out_of_scope"])
+    out += items("Rules", brief.get("rules", []))
     if brief["look"].strip():
         out += [f"**Look and feel:** {brief['look'].strip()}", ""]
     return "\n".join(out).strip()

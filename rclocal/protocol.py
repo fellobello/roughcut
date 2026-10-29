@@ -99,12 +99,13 @@ def _enum(*values):
 QUESTION = _obj(["text", "options", "default", "why"], text=STR, options=_list(OPTION), default=STR, why=STR)
 # What the app is, agreed with the user before building. Kept in .hub/brief.json and PROJECT.md.
 BRIEF = _obj(
-    ["name", "pitch", "must_have", "nice_to_have", "out_of_scope", "look"],
+    ["name", "pitch", "must_have", "nice_to_have", "out_of_scope", "look"],  # rules is new: older briefs lack it
     name=STR,
     pitch=STR,  # one or two sentences
     must_have=_list(STR),
     nice_to_have=_list(STR),
     out_of_scope=_list(STR),
+    rules=_list(STR),  # what the owner said exactly: defaults, rounding, limits, inputs to refuse
     look=STR,  # how it should look and feel
 )
 # One brainstorm turn: the brief so far, where the brainstormer pushes back, and up to 3 questions.

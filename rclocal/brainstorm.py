@@ -15,9 +15,11 @@ Turn() is separate from the terminal (cli.py asks the questions), so tests drive
 from __future__ import annotations
 
 import json
+import re
 
 from . import agents, project
 from .hub_local import HUB_OWNER
+from .likeness import settled, words
 
 LETTERS = "abcd"
 
@@ -48,9 +50,15 @@ class Brainstorm:
         notes = ""
         if (self.hub.project / "PROJECT.md").exists() and self.hub.contracts.all():
             notes = (self.hub.project / "PROJECT.md").read_text(encoding="utf-8")[:5000]
-        reply = await agents.brainstorm(sched, self.hub.stack, idea, notes, self.transcript(), turns_left)
+        answered = self.answered()
+        decided = "\n".join(f"- {q['text']} -> {q['answer']}" for q in answered)
+        reply = await agents.brainstorm(sched, self.hub.stack, idea, notes, self.transcript(), turns_left, decided)
         questions = []
-        for asked in [q for q in reply["questions"] if q["text"].strip()][:3]:
+        for asked in [q for q in reply["questions"] if q["text"].strip()]:
+            if settled(asked["text"], [o["label"] for o in asked["options"]], answered):
+                continue  # you answered it already, in other words
+            if len(questions) == 3:
+                break
             # options as short labels, with what each means kept for hover
             details = {" ".join(o["label"].split()): o["detail"].strip() for o in asked["options"] if o["label"].strip()}
             options, default = list(details)[:4], " ".join(asked["default"].split())
@@ -60,12 +68,18 @@ class Brainstorm:
         reply = {**reply, "questions": questions}
         said_before = " ".join(t["text"] for t in self.talk if t["who"] == "brainstormer")
         reply["pushback"] = [p for p in reply["pushback"] if p.strip() and p.strip() not in said_before]
+        reply["brief"] = left_out(reply["brief"], [t["text"] for t in self.talk if t["who"] == "you"])
         project.save_brief(self.hub, reply["brief"])
         said = reply["pushback"] + [f"Q: {q['text']} ({' / '.join(q['options'])}; I'd pick {q['default']})"
                                     for q in reply["questions"]]
         self.talk.append({"who": "brainstormer", "text": " ".join(said) or "The brief looks clear to me."})
         self.save()
         return reply
+
+    def answered(self):
+        """Your answers so far, from this brainstorm and any before it."""
+        return [q for q in self.hub.questions() if q["task"] == HUB_OWNER and q["status"] == "answered"
+                and not q.get("example")]
 
     def answer(self, question, reply):
         """Record your answer to one question. reply: "" (the pick), a letter, or your own words."""
@@ -94,3 +108,30 @@ class Brainstorm:
 
     def save(self):
         self.hub._write_text(self.path, json.dumps(self.talk, indent=2) + "\n")
+
+
+# "skip the receipt", "no printable receipt", "leave out dark mode": a clause that says no to something
+NO = re.compile(r"\b(skip|skipping|leave (?:it |that )?out|leave out|no|not|without|don't|dont|drop|remove)\b", re.I)
+
+
+def left_out(brief, said):
+    """The brief with anything you said to leave out moved to out of scope, whatever the model kept.
+
+    A must-have or nice-to-have goes when one clause of yours says no and names most of
+    its words ("skip the printable receipt" -> "Printable receipt option"). Items that are
+    themselves a "no" ("No account or server required") stay where they are.
+    """
+    clauses = [c for text in said for c in re.split(r"[.,;!?\n]+", text) if NO.search(c)]
+    brief = {**brief, "out_of_scope": list(brief["out_of_scope"])}
+    for key in ("must_have", "nice_to_have"):
+        kept = []
+        for item in brief[key]:
+            mine = words(item)
+            hit = not NO.match(item.strip()) and len(mine) >= 1 and any(
+                len(mine & words(c)) >= min(2, len(mine)) for c in clauses)
+            if hit:
+                brief["out_of_scope"].append(item)
+            else:
+                kept.append(item)
+        brief[key] = kept
+    return brief

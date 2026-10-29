@@ -1285,6 +1285,30 @@ class SchedulerTest(unittest.TestCase):
         self.assertEqual(len(ends), 4)
 
 
+class FindingsTest(unittest.TestCase):
+    """What the SplitTip test run turned up, checked without a model."""
+
+    def test_the_same_question_in_other_words_is_noticed(self):
+        from rclocal.likeness import same_question, settled
+
+        self.assertTrue(same_question("Should the app support splitting by percentage or equal amounts?", [],
+                                      "Split by Percentage or Equal Amounts"))
+        self.assertTrue(same_question("Should the app include a dark mode?", [], "Dark Mode Toggle"))
+        self.assertFalse(same_question("Who is the target audience?", [], "Should the app include a dark mode toggle?"))
+        self.assertTrue(same_question("Colour scheme?", ["Light", "Dark"], "Which theme?", ["dark", "light"]))
+        self.assertEqual(settled("The default tip percentage is not set.", [], [], ["Default tip is 15%"]),
+                         "Default tip is 15%")
+
+    def test_what_you_said_to_skip_leaves_the_brief(self):
+        from rclocal.brainstorm import left_out
+
+        brief = {"must_have": ["No account or server required"], "out_of_scope": [],
+                 "nice_to_have": ["Dark mode toggle", "Printable receipt option"]}
+        out = left_out(brief, ["nice to have: a dark mode toggle. skip the printable receipt."])
+        self.assertEqual(out["nice_to_have"], ["Dark mode toggle"])
+        self.assertEqual(out["out_of_scope"], ["Printable receipt option"])
+        self.assertEqual(out["must_have"], ["No account or server required"])  # itself a no: kept
+
 class FailureDigestTest(unittest.TestCase):
     def test_the_values_are_kept_and_the_stack_frames_dropped(self):
         from rclocal.rounds import failure_digest

@@ -72,7 +72,7 @@ QUESTION_RULES = (
 )
 
 
-async def brainstorm(sched, stack, idea, project_notes, talk, turns_left):
+async def brainstorm(sched, stack, idea, project_notes, talk, turns_left, settled=""):
     """One brainstorm turn. talk is the conversation so far as text. Returns BRAINSTORM data."""
     platform = "a web page that runs in the browser, with no server and no accounts" if stack.name == "web" else (
         "a standard-library Python program"
@@ -81,13 +81,16 @@ async def brainstorm(sched, stack, idea, project_notes, talk, turns_left):
         "Brainstormer: You talk an app idea through with its owner before anything is built, like a good product "
         f"partner. The app will be {platform}, built by small local models, so smaller and clearer is better. "
         "Keep a brief of the app: a name, a one or two sentence pitch, must-haves (at most 5), nice-to-haves, "
-        "what is out of scope, and how it should look and feel. Push back where it helps: say in one sentence "
+        "what is out of scope, rules (every exact rule the owner gave: defaults, rounding, limits, which inputs "
+        "to refuse, in the owner's words), and how it should look and feel. Anything the owner said to skip or "
+        "leave out goes in out of scope, never in must-haves or nice-to-haves. Push back where it helps: say in one sentence "
         "each what you would cut, simplify or add, and why; agree when the idea is already good. Never repeat a "
         "point you made earlier in the talk; if you have nothing new to say, leave pushback empty. "
         f"{QUESTION_RULES} Set ready to true when the brief is clear enough to build the first version; "
         f"you have {turns_left} turn(s) left, so on the last one set ready to true and ask nothing. {JSON_ONLY}"
     )
-    user = _section("Idea", idea) + _section("What the project already is", project_notes) + _section("Talk so far", talk)
+    user = (_section("Idea", idea) + _section("What the project already is", project_notes)
+            + _section("Already decided by the owner (never ask about these again)", settled) + _section("Talk so far", talk))
     return await sched.ask("brainstormer", _chat(system, user), "brainstorm", reply="brainstorm")
 
 
