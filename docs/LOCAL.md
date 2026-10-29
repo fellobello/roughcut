@@ -102,7 +102,9 @@ each with its own contract, examples, tests and builder. The file keeps its cont
 tests and is rebuilt as a thin file that imports the pieces, so nothing that uses it changes.
 A file is split only once, and a piece is never split again.
 
-When the models still can't get a file to pass, it's **left for you**: the file keeps its best attempt,
+The first time a file gets stuck, it gets another set of tries on its own (as if you'd
+answered "Try again"; change the answer in Talk to take it yourself). When the models still
+can't get a file to pass, it's **left for you**: the file keeps its best attempt,
 with a note at the top saying what it must do (its contract and examples), how it's tested
 and why they got stuck, and everything that doesn't need it is built anyway. Finish it in
 any editor; once its tests pass, the next round marks it done. Or answer its guess with

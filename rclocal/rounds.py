@@ -76,6 +76,7 @@ DESIGN_TASK = "page-design"
 INLINE_HANDLER = re.compile(r"\s(on[a-z]+)\s*=\s*[\"']", re.I)
 UI_NAMES = {"ui", "dom", "view", "views", "page", "index", "main", "app", "display", "render", "renderer", "interface", "screen"}
 VERIFY_PARALLEL = 3
+STUCK_NOTE = " is stuck: "  # in the question that takes a stuck file's contract back to the planner
 REPLAN = "Plan it again"  # the answer recorded when a contract can't work, so the next plan revises it
 MAX_RULES = 20
 
@@ -319,8 +320,8 @@ class Round:
         for q in self.hub.questions():
             if q["task"] != HUB_OWNER or q["status"] != "answered" or q["answer"] == REPLAN:
                 continue
-            if q["text"].startswith("What should change next?"):
-                continue  # a change request, handled by the plan it was asked for
+            if q["text"].startswith("What should change next?") or STUCK_NOTE in q["text"]:
+                continue  # a change request or a stuck file, handled by the plan it was asked for
             if q.get("example") and q["answer"] == RIGHT:
                 continue  # nothing to follow; a wrong example is worth saying, so the planner doesn't repeat it
             lines.append(f"- {q['text']} -> {q['answer']}")
@@ -978,7 +979,8 @@ class Round:
 
         The file keeps its best attempt, with a comment at the top saying what it must do,
         how it's tested and why the models got stuck. Nothing waits: the task is marked
-        failed (so only the files that need it wait), and the run goes on.
+        failed (so only the files that need it wait), and the run goes on. The first time a
+        file is stuck the question is answered Try again, so you're only asked the second time.
         """
         hub, path = self.hub, contract["path"]
         note = self.stack.comment(handover_lines(hub.contracts.brief(path), contract, why, failure, self.stack))
@@ -989,6 +991,12 @@ class Round:
             why="The models couldn't get it to pass. Everything that doesn't need it was built anyway.",
             options=STUCK_OPTIONS,
         )
+        earlier = [q for q in hub.questions() if q["task"] == task["id"] and q["id"] != question["id"] and is_stuck_question(q)]
+        if not earlier:  # the first time a file is stuck, it gets another go before it's yours: your answer can change that
+            hub.answer(question["id"], TRY_AGAIN)
+            self.events.emit("note", text=f"{path} is stuck for the first time, so it gets another try; "
+                                          "change the answer in Talk to take it yourself")
+            return "failed", f"stuck, trying again: {why}"
         self.events.emit("question", id=question["id"], text=question["text"], blocking=False)
         return "failed", f"left for you: {why}"
 
@@ -1042,7 +1050,7 @@ class Round:
                 if contract_wrong:  # the plan changes the contract, and the tests are written again
                     how = ("Simplify it: trim what it promises so it can work and be tested as written"
                            if answer == SIMPLIFY else "Its contract was to blame: fix the contract so it can work")
-                    ask = hub.ask(HUB_OWNER, f"{contract['path']} is stuck: {q['text'][:300]}", critical=True, choice=how)
+                    ask = hub.ask(HUB_OWNER, f"{contract['path']}{STUCK_NOTE}{q['text'][:300]}", critical=True, choice=how)
                     hub.answer(ask["id"], how)
                     self.redo(contract["id"] + "-tests", f"you said: {answer}")
                 hub.restart(task["id"], f"you said: {answer}")

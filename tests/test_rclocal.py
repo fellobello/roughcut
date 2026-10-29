@@ -400,8 +400,9 @@ class RoundTest(HubCase):
         self.assertIn("def to_celsius(f: float) -> float", left)  # the contract, in the note
         self.assertIn("python3 -m unittest tests.test_app_convert", left)
         self.assertIn("return f - 32", left)  # and its best attempt, kept
-        guess = next(q for q in self.hub.questions() if q["task"] == "app-convert-py")
-        self.assertEqual((guess["status"], guess["choice"]), ("decided", I_GOT_IT))
+        first, *_, last = [q for q in self.hub.questions() if q["task"] == "app-convert-py"]
+        self.assertEqual((first["status"], first["answer"]), ("answered", "Try again"))  # the first time, it tries again
+        self.assertEqual((last["status"], last["choice"]), ("decided", I_GOT_IT))  # the second time, it's yours
         self.assertEqual(self.statuses()["app-report-py"], "todo")  # only what needs it waits
 
     def test_simplify_sends_a_stuck_file_back_to_the_planner_with_new_tests(self):
@@ -559,7 +560,7 @@ class RoundTest(HubCase):
 
         self.run_round(py_script({"app/convert.py": [CONVERT_BAD], "app/report.py": [REPORT_GOOD]}, verdict="contract"))
         replan = [q for q in self.hub.questions() if q["answer"] == REPLAN]
-        self.assertEqual(len(replan), 1)
+        self.assertEqual(len(replan), 2)  # stuck, tried again on its own, stuck again
         self.assertIn("app/convert.py's contract can't work", replan[0]["text"])
         self.assertEqual(self.hub.task("app-convert-py")["status"], "failed")
         rnd = Round(self.hub, FakeLLM(None))
