@@ -235,3 +235,123 @@ What worked well: Stop (≈3 s, clean), Change answer, the Progress tab (live ou
 | project `.hub/contracts/app-bill-js.json`, `app-utils-js.json` | `math.round(...)` example values → 115 / 55 / 58 / 57 | Throw away (item 4 prevents it) |
 | project `tests/app_bill.test.mjs`, `tests/app_utils.test.mjs` (`// TEMP(test-run)`) | same literal values in the contract-examples tests | Throw away |
 | project `index.html` (3 markers) | split buttons get ids, listeners by id, no inline onclick, state set by id | Throw away (model output; item 9 should let the designer get there itself) |
+
+---
+
+# Test run 2 (branch fix-splittip-findings, after the fixes in dff9000)
+
+Started 2026-10-28 17:50. Same studio port, same models, same answers. New project folder (the first run's `u-build-tip` is kept as evidence).
+
+## Log
+
+### Brainstorm (17:52–17:56): 2 turns, 3 questions, 0 repeats
+- Turn 1 asked new questions this time (split tip vs total, more than 10 people, Reset button), all fresh. It invented rules "two decimal places" and "max 10 people", but my Talk message replaced them.
+- Turn 2 asked nothing and said "The brief looks clear to me". The brief now has `rules`: default 15%, Math.round whole dollars, order doesn't matter, refuse zero/negative bill and zero people. "Printable receipt" sits in out_of_scope (fix 3 worked).
+- Miss: I said Yes to a Reset button (hub.3) but it isn't in the brief. The brainstormer dropped it, and no code moves "yes to an add-X question" into the brief. Small.
+- Evidence: `~/roughcut-projects/u-build-tip-2/.hub/brief.json`, `brainstorm.json`.
+
+### Round 0 plan (17:57)
+- Literal check caught 4 of 11 examples that weren't values and re-asked the planner (events.jsonl ts 1793237424). After the retry, examples that still weren't literal were dropped: `app/bill.js` calculateTotal has none at all now. Better than a ReferenceError, but a file with 0 examples gets weaker tests. Idea: when cleaning leaves an export with no examples, ask only that one again or compute the value with node.
+- Example checks (hub.7 `splitAmount(115, 3) → [38, 38, 39]`, hub.8) were correct. I answered within ~30 s, and `app-split-js-tests` didn't start until both were answered, while the other tests tasks ran (fix 4 worked).
+- MISS: 3 planner guesses got past the repeat filter ("Rounding Rule", "Tip Calculation Method", "Split Method"). Their **picks** restate the brief ("Round to the Nearest Dollar"), but the titles are too short to match on text alone: "Rounding Rule" overlaps the rule by 1 word out of 2. Fix: compare text + choice against rules and answers. Pointless questions: 3.
+
+### Round 0 result (18:57, ~60 min): 12 done, 3 failed, 2 todo
+- Done first try or close: tip.js, bill.js, utils.js, all tests tasks. The builder-decision filter dropped 5 repeats ("Default tip percentage", "Rounding rule" ×2, "default 15% configurable?"). One still got through as a non-card decision ("tip rounded to whole number, configurable?").
+- page-design failed 3 drafts: twice for importing an export from the wrong file (tip.js / split.js don't export calculateTotal, bill.js does), then the draft got cut off at the length limit. The designer prompt lists contracts, but the 7b model mixes up which file exports what.
+- split.js: failed, auto-split into 4 parts (`app/split_parts/*`). calculate_total piece passes.
+  - validate_input.js stuck: contract blamed (the test expects a thrown object with `.message`, the code throws an Error; that's really a test bug). First stuck → Try again → **"back to the planner, with new tests"** (fix 11 worked, events.jsonl round 1 start).
+  - split_amount.js stuck: the planner made it call calculateTotal (adds the tip) when it should split an already-tipped total. Contract/data-flow confusion. First stuck → Try again.
+- Questions so far: 3 brainstorm, 5 plan (3 pointless guesses + 2 example checks), 2 stuck = 10. Pointless 3.
+
+### Round 1 plan (18:58–19:00)
+- The literal check rejected 3 of 5 examples again and re-asked. The second plan's examples were all literal and correct (hub.11–14: splitAmount(120, 4) → [30×4], calculateTotal(100, 15) → 115, (115, 15) → 132, (100, 0) → 100). All Right.
+- Planner calls in round 1: 66 s + 91 s. No hang (I misread a timestamp; corrected the round 0 time above).
+
+### Round 1 (19:05): my unused-file check blocked the page — fixed mid-run
+- page-design failed 3 drafts with "the page never uses app/split.js, app/tip.js". The plan has two files that compute the total (tip.js and bill.js), so a page that uses one is fine; the check was too strict (fix 14C, my own regression). Changed it to a note emitted when the page passes (commit after dff9000), and the studio restarts after round 1.
+
+### Round 1 (19:15): validate_input.js stuck again — reviewer blamed the contract, but it's the code
+- Code: `throw new Error({ message: 'Bill must be a positive number.' })` → message "[object Object]". The tests (`assert.throws(..., { message: '...' })`) are right. The reviewer (qwen3:8b) said "contract can't work" twice, so Try again sent it to the planner, which couldn't fix a code bug.
+- Evidence: `app/split_parts/validate_input.js`; `node -e` by hand: throws "[object Object]"; `.hub/questions/app-split-parts-validate-input-js.2.json`.
+- GUESS: the rules didn't fit (it doesn't work by hand, and the contract isn't impossible). I answered in my own words with the exact fix, which restarts the builder with my text as a note.
+- Software idea: when the review blames the contract, run a cheap check first — does the failing assertion's expected value appear in the contract? If the contract and test agree, blame the code.
+- 19:18, calculate_total.js (split piece) stuck: here the **tests** are wrong — they expect `calculateTotal(-100, 15)` → -100 and `(0, 15)` → 0, against the brief's rule "refuse a zero or negative bill". The code (throws) follows the rule. The tester ignored the rules that reach it. First stuck → Try again (by the rules; "It works" would be the honest answer).
+- Pattern in this run: the reviewer's blame is unreliable — once it blamed the contract for a code bug, once the code for a test bug. That decides where the fix goes, so it matters more than any single prompt. Idea: a deterministic tie-break — if the failing assert's expected value contradicts a brief rule or a contract example, blame the test; if the test matches the contract, blame the code.
+
+### Round 2 (19:20–19:30)
+- Page passes its check for the first time this run ("index.html and styles.css work in the browser"), after the unused-file check became a note.
+- validate_input.js examples (hub.16–18, valid input → undefined) correct → Right.
+- calculate_total.js (piece) stuck 2nd time: blamed the contract for "expects a default export". Actually the **tester** wrote `import calculateTotal from …` (a default import) though the contract has a named export. By hand it returns the right totals (115, 132, 100). For a bad bill it returns the bill instead of refusing (it followed round 1's wrong tests), but validate_input.js does the refusing. Picked **It works** (by the rules).
+- Software fix: `repair_test` could rewrite `import X from '../app/f.js'` to `import { X } from …` when X is a named export in the contract. Cheap and deterministic; this exact mistake cost a full builder attempt plus a review.
+- 19:32, validate_input.js stuck a 3rd time. My round-1 hint fixed the code (`throw new Error('Bill must be a positive number.')`), but the regenerated tests (contract v3) use `t.throwsAsync(...)`, an AVA API that node:test doesn't have → TypeError in every test. Reviewer again said "contract can't work". By hand it throws the right messages and returns undefined for good input → **It works**.
+- Software fix: `test_problem` should reject test files that call APIs node:test/node:assert don't have (`t.throws*`, `t.is`, `expect(`, `jest.`), the same way it rejects missing imports. Deterministic, small.
+
+### Round 3 (19:34)
+- 3 new example checks for calculate_total, 2 against the brief's rule: `(0, 15) → 0` and `(-50, 15) → 0` should be refused → Wrong ("Just drop it"); `(100, 0) → 0` → Wrong, typed 100. The new Wrong flow worked (it asks for the value, with a "Just drop it" button), and the drop applied mid-round ("calculateTotal(0, 15) is dropped, as you said", fix 4B/5).
+- The planner keeps writing examples that break the brief's "refuse" rule for calculate_total, even though `rules` reach it. Model limit; or the refusal belongs in validate_input only and the planner is right that calculateTotal never sees bad input. Ambiguous ownership.
+
+### Round 3 result (19:51): no progress (12 done) — stopped round 4 to fix roughcut
+- "It works" didn't stick. calculate_total.js was marked done at round 3 start, but the stuck question's text names the file, so `protected()` dropped its protection and the round 3 plan rewrote its contract (v4). That made new example checks, then a rebuild, and it got stuck the same way again. validate_input.js's "It works" was given ~10 s after round 3 started, so the round's `revisit_stuck` missed it and `retry_failed` rebuilt it.
+- Both are regressions or gaps in my fix 1. Fixed in 9212d80: stuck-file answers are kept out of plans and protection (`is_stuck_question`), and they're applied between tasks mid-round as well as at round start.
+- Also fixed (deterministic): `repair_test` turns `import X from '../app/f.js'` into `import { X }` when X is a named export; `test_problem` rejects AVA/Jest APIs (`t.throwsAsync`, `t.is`, `expect(`). Those two tester mistakes caused 4 of this run's stuck questions.
+- Guess filter now also checks the guess's pick ("Round to the Nearest Dollar" matches the rule).
+- Rounds without progress so far: 1 (round 1), round 3. Round 2 made progress (page).
+
+### Round 4 (19:55–20:09)
+- Round start: "calculate_total.js: done, because you said it works as it is" and the same for validate_input.js. Both stayed done through the plan this time (9212d80 worked).
+- Page passed again. split_logic.js stuck: it returns `splitAmount(115, 3)` → [39, 38, 38], the contract says [38, 38, 39]. The brief's rule says order doesn't matter, but `deepStrictEqual` does. First stuck → Try again (by the rules).
+- Software idea: when the brief says order doesn't matter (or for any whole-dollar split), the contract-examples test could compare sorted arrays. Better in general: let a contract example carry a "same items, any order" flag the planner sets, and have `example_tests` emit `assert.deepStrictEqual([...x].sort(), [...].sort())`.
+- 20:11, bill.js (done since round 0) was rewritten by the round 4 plan and then got stuck: its new code returns 0 for `calculateTotal(100, 0)` (should be 100), and the reviewer blamed the contract (wrong again). Cause: my round 3 answer "calculateTotal(100, 0) → 100" was about `app/split_parts/calculate_total.js`, but `protected()` matches answers to files by export name, and bill.js also exports calculateTotal. So bill.js lost its protection. Fixed (commit after 9212d80): an example answer only counts for its own file. Picked Try again (first stuck for bill.js).
+- Wider point: two files exporting the same function (bill.js and split_parts/calculate_total.js both have calculateTotal) is a planning smell. The split made a duplicate instead of importing the existing one.
+- 20:19, split_logic.js stuck 2nd time, on the order again (the tests were rewritten but still expect a fixed order). By hand: (115, 3) → [39, 38, 38], (99, 2) → [50, 49], (100, 5) → [20×5], (120, 4) → [30×4], all right and adding up to the total → **It works**.
+- 20:20, bill.js stuck 2nd time: code `if (bill <= 0 || tipPercentage <= 0) return 0;` → (100, 0) gives 0. The contract (→ 100) is right; the reviewer blamed the contract both times. GUESS (rules don't cover "broken by hand, contract fine"): answered with the fix in my own words.
+- 20:25, split_amount.js stuck 2nd time on array order; by hand all right → **It works**.
+- 20:28, bill.js stuck 3rd time; my hint didn't change the code (`tipPercentage <= 0 → return 0` stayed). Nothing imports bill.js: the page uses `split_parts/calculate_total.js`, a duplicate made by the split. GUESS: **I got it** (unused file, same call as run 1).
+
+### Round 4 result: 15 done, 2 failed (split.js parent; bill.js parked). Round 5 stopped at once: the app works.
+
+### End-to-end check in the browser (no hand edits this run)
+- 120 + 15% for 3 → total $138.00, share $46.00. 100 + 15% for 2 → $115.00, $58.00. A zero bill, a negative bill and 0 people are refused (results go back to "—"). No console errors.
+- Gaps against the brief: one "Individual Share" figure instead of each person's share (for 115 / 2 it shows $58, not $58 and $57); shown with cents ($46.00) though splits are whole dollars; no split-by-percentage; no dark-mode toggle; dark kit theme instead of light-on-gradient; 15% isn't prefilled; refusals show no message, just "—". The page uses `split_parts/*` directly, so `split.js`, `bill.js` and `tip.js` are built but unused.
+
+---
+
+## Run 2 summary
+
+| | Run 1 | Run 2 |
+| --- | --- | --- |
+| Works end to end | only after a hand fix to index.html | **yes, no hand edits to generated code** |
+| Rounds | 6 | 6 (round 4 stopped once for a fix, round 5 stopped when the app worked) |
+| Model time | 59 min, 444 calls | 96 min, 556 calls (builder 62 min, planner 13, designer 9) |
+| Tasks at end | 13 done / 2 failed | 14 done / 1 failed / 2 todo (the 3 not done are unused files) |
+| Questions to me | 29, 11 pointless | ~33: 3 brainstorm, 3 plan guesses, 12 example checks, 15 stuck-file. 3 pointless guesses; ~4 more stuck questions came from roughcut bugs fixed mid-run |
+| Repeat questions | 6 brainstorm + 3 restated | 0 brainstorm; 3 plan guesses (fixed after); 9 repeats filtered automatically |
+| Brief | lost rules, kept skipped receipt | all rules kept, receipt in "left out" |
+| TEMP edits to generated code | 3 files | none |
+
+Model time went up because the split pieces needed many attempts. Most failures traced to two causes: tests holding arrays to one order the rules say doesn't matter (3 files, 6 stuck questions), and the reviewer blaming the contract for code or test bugs (5 of 7 "contract can't work" verdicts were wrong).
+
+## Code changes during run 2 (all real fixes, no TEMP markers)
+- `dff9000` — the recommended fixes from run 1 (see the list in chat).
+- Page check: a logic file the page doesn't use is a note, not a rejection (my unused-file check had blocked the page in round 1).
+- `9212d80` — stuck-file answers ("It works", "I got it") are kept out of plans and file protection and are applied mid-round; `repair_test` turns default imports of named exports into named imports; `test_problem` rejects AVA/Jest APIs; guesses are also matched on their pick.
+- Next commit — an example answer only unprotects its own file, not every file with an export of the same name.
+- Studio: Wrong asks for the value, the question card stays put, a note shows waiting questions on other tabs, tooltips sit above options, and a falling-block game for while you wait.
+
+## Still to fix (ranked, from run 2)
+1. **Reviewer blame is unreliable** (M). 5 of 7 contract verdicts were wrong, and the verdict decides where the fix goes. Add a deterministic tie-break: if the test's expected value equals the contract example, blame the code; if it contradicts a brief rule, blame the test.
+2. **Order-insensitive examples** (S–M). Let the planner mark an example "any order", or apply it automatically when the brief says order doesn't matter, and emit sorted comparisons. This would have saved ~6 stuck questions.
+3. **Duplicate functions across files** (M). The split made `split_parts/calculate_total.js` beside the existing `bill.js` calculateTotal, and the page used neither parent. Split pieces should import existing contracts rather than redefine them; flag exports with the same name in two files.
+4. **The page doesn't match the brief** (M). It shows one share instead of each person's, uses cents, has no toggle or percentage split, and the theme is dark. The designer needs the brief's must-haves as a checklist the page check tests (e.g. "results show N values for N people").
+5. **Examples dropped to none** (S). After the literal retry, calculateTotal in bill.js kept 0 examples. Re-ask for that export only, or evaluate the call with node to fill in the value.
+6. **Yes-to-add answers don't reach the brief** (S). The Reset button I said yes to was lost.
+7. **A file's tests rewritten to contradict the rules** (model). The tester ignored "refuse bad bills" twice.
+
+## What other harnesses do that roughcut could borrow (beyond "a bigger model")
+- **Agentless** (localize → repair → validate): one model call per stage, no free-form agent loop, and *several candidate patches ranked by tests* (reproduction + regression tests). For roughcut: on a file's last attempt, sample 2–3 whole-file candidates at a higher temperature in parallel and keep the one that passes the most tests. Small models are much better at "one of three is right" than "the first one is right".
+- **AlphaCodium** ("flow engineering"): reason about the problem in plain words first, then generate code against public tests plus *AI-generated tests*, with "test anchors": tests that already passed must keep passing, and they "always fix the code, not the tests". For roughcut: a one-paragraph "what this file must do, and its edge cases" pre-step for the builder, and anchors. Once a test passes for a file, a later rewrite of that file's tests may not drop it. That would have stopped calculate_total's tests flipping from "refuse" to "return the bill".
+- **Aider**: lint and test after every edit, feed the failure straight back, and use *whole-file edits for weaker models* (roughcut already does both). Its repo map (signatures only, from tree-sitter) is the same idea as roughcut's contracts.
+- **SWE-agent's "agent-computer interface"**: the tools reject a bad edit (a linter guard) before it lands. Roughcut's `check_code` is this; this session added parameter shadowing, page access in logic files and other runners' test APIs. More cheap linters (unused import, duplicate export names across files, `new Error({...})`) are the best value per line of code.
+- **Deterministic before generative**: every fix in this session that worked best was code, not a prompt (literal check, re-export shim, repeat-question filter, import repair). The general rule: whenever a small model's mistake is recognisable by a regex or by running node, catch it in code and either repair it or send back a one-line reason.
+
+Sources: Agentless — github.com/OpenAutoCoder/Agentless (via newfacade.github.io/notes-on-llm/agent/agentless.html); AlphaCodium — arxiv.org/abs/2401.08500; Aider — aider.chat/docs/usage/lint-test.html.
