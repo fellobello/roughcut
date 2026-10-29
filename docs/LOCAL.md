@@ -62,9 +62,17 @@ to the planner, tester, builder and reviewer in every round, not just the round 
 gave it, so a rule like "shares are whole dollars" can't get lost. Tests check values and
 behaviour, never the exact wording of a message or label the contract didn't spell out. A
 contract's examples are checked one by one: any that aren't real values are left out, and a
-plan whose examples are mostly junk is asked for again. When the reviewer finds a contract
-that can't work (it contradicts you, or a function is missing an input), the next plan
-revises it, and the file gets a fresh set of tries.
+plan whose examples are mostly junk is asked for again. When a contract can't work (it
+contradicts you, or a function is missing an input), the next plan revises it, and the file
+gets a fresh set of tries.
+
+**Blame goes by the facts first.** When a file keeps failing, who is wrong is settled
+without a model where the facts decide it: tests that import a name the contract doesn't
+have, or expect something else than the contract's own example for the same call, are
+wrong; code that fails the contract's examples is wrong; code that meets every example
+while the tester's extra tests fail means the tests asked for more than the contract
+promises; a contract that gives two results for one call is wrong. Only what's left goes to
+the reviewer, which may blame the contract only by quoting the words that can't work.
 
 **You check the examples.** Small models get arithmetic wrong, and one wrong example fails a
 file that's right. So every new example a plan writes comes up in Talk as "Is this right?
@@ -162,7 +170,8 @@ Every role has one job and its own model in `.hub/local.json` (the list is
    for every file, as soon as a slot is free and its imports are built:
        tester  ──► the file's tests, from the contract alone
        builder ──► an agent: picks read / write / test / finish / ask, step by step
-       reviewer ─► still failing? blame the code (retry), the test (rewrite it) or the contract (ask you)
+       reviewer ─► still failing? blame the code (retry), the test (rewrite it) or the contract (replan),
+                   from the facts where they decide it, else the reviewer model
      │
    designer (web) ──► first, as soon as there's a plan: index.html + styles.css from kit.css,
                       on placeholder files that return their contracts' examples, so the

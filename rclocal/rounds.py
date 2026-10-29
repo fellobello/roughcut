@@ -27,7 +27,7 @@ import re
 import subprocess
 import time
 
-from . import agents, pages, project
+from . import agents, blame, pages, project
 from .contracts import ContractError, file_id
 from .hub_local import HUB_OWNER, HubError
 from .likeness import settled
@@ -68,7 +68,6 @@ EXAMPLE_OPTIONS = [
     {"label": WRONG, "detail": "Drop it from the contract and the tests. Or type what it should return instead."},
 ]
 MAX_EXAMPLE_CHECKS = 4  # per plan
-EXAMPLES_TESTS = ("the contract examples hold", "ContractExamples")  # the test stacks.example_tests adds
 KEEP_TURNS = 12  # agent messages kept after the opening two, so its context stays small
 SPLIT_AFTER = 2  # failed attempts with the code to blame before a file is split into smaller ones
 MAX_PIECES = 4
@@ -799,12 +798,16 @@ class Round:
         hub = self.hub
         test_file = hub.project / contract["test_path"]
         test_code = test_file.read_text(encoding="utf-8") if test_file.exists() else ""
-        verdict = await agents.review(self.sched, hub.contracts.brief(contract["path"]), test_code, code,
-                                      failure_digest(failure, 2500), self.rules())
+        verdict, how = blame.settle(self.stack, contract, test_code, code, failure), "settled by the facts"
+        if verdict is None:
+            brief = hub.contracts.brief(contract["path"])
+            verdict, how = await agents.review(self.sched, brief, test_code, code, failure_digest(failure, 2500),
+                                               self.rules()), "reviewer"
+            if verdict["blame"] == "contract" and not blame.quoted(verdict.get("quote", ""), brief):
+                verdict = {"blame": "code", "reason": f"{verdict['reason'].strip()} (the reviewer blamed the contract "
+                                                      "but quoted no line of it, so the code gets another try)"}
         reason = verdict["reason"].strip() or "no reason given"
-        if verdict["blame"] == "test" and any(name in failure for name in EXAMPLES_TESTS):
-            verdict = {**verdict, "blame": "contract"}  # the failing check is the contract's own examples
-        self.events.emit("note", text=f"review of {contract['path']}: blame {verdict['blame']}: {reason}")
+        self.events.emit("note", text=f"review of {contract['path']} ({how}): blame {verdict['blame']}: {reason}")
         hub.set_field(task["id"], "blame", verdict["blame"])
         max_attempts = hub.config()["max_attempts"]
         test_id = contract["id"] + "-tests"

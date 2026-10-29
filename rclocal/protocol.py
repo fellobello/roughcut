@@ -86,7 +86,8 @@ NOTES = _obj(
     lesson=STR,  # one line worth remembering for later files, or ""
 )
 BLAMES = ("code", "test", "contract")
-REVIEW = _obj(["blame", "reason"], blame={"type": "string", "enum": list(BLAMES)}, reason=STR)
+# quote: the contract words that can't work, which the reviewer must give to blame the contract ("" otherwise).
+REVIEW = _obj(["blame", "reason", "quote"], blame={"type": "string", "enum": list(BLAMES)}, reason=STR, quote=STR)
 REPORT = _obj(["notes"], notes=STR)
 
 

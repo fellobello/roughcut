@@ -161,7 +161,8 @@ class Script:
         if role == "designer":
             return "```html\n" + PAGE + "\n```" if "## Idea" in user else "```css\n" + CSS + "\n```"
         if role == "reviewer":
-            return {"blame": self.verdict, "reason": "it subtracts but never scales"}
+            return {"blame": self.verdict, "reason": "it subtracts but never scales",
+                    "quote": "to_celsius(f: float) -> float" if self.verdict == "contract" else ""}
         if role == "reporter":
             return {"notes": "Built the converter."}
         raise AssertionError(f"unexpected role {role}")
@@ -1397,6 +1398,50 @@ class FindingsTest(unittest.TestCase):
         shim = web.reexport("app/bill.js", {"splitBill": "app/bill_parts/split_bill.js"})
         self.assertIn("export { splitBill } from './bill_parts/split_bill.js';", shim)
         self.assertEqual(web.syntax_error(shim, "app/bill.js"), "")
+
+
+class BlameTest(unittest.TestCase):
+    """Who is wrong when a file fails, settled without the reviewer where the facts decide it."""
+
+    TIP_CONTRACT = {"path": "app/tip.js", "test_path": "tests/app_tip.test.mjs", "imports": [], "exports": [
+        export("tipFor", "function tipFor(bill, percent) -> number",
+               examples=[{"call": "tipFor(100, 15)", "returns": "15"}])]}
+    TESTS = ("import { test } from 'node:test';\nimport assert from 'node:assert';\nimport { tipFor } from '../app/tip.js';\n"
+             "test('tips', () => { assert.strictEqual(tipFor(200, 10), 20); });\n")
+    EXAMPLES = ("\n// The examples in the contract, exactly as written there.\ntest('the contract examples hold', () => {\n"
+                "  assert.deepStrictEqual(__contract.tipFor(100, 15), 15);\n});\n")
+    CODE = "export function tipFor(bill, percent) { return bill * percent / 100; }\n"
+
+    def settle(self, tests, failure, contract=None, code=None):
+        from rclocal.blame import settle
+
+        return settle(STACKS["web"], contract or self.TIP_CONTRACT, tests, code or self.CODE, failure)
+
+    @unittest.skipUnless(HAS_NODE, "needs node")
+    def test_the_facts_decide_where_they_can(self):
+        tests = self.TESTS + self.EXAMPLES
+        self.assertEqual(self.settle(tests, "✔ tips (0.4ms)\n✖ the contract examples hold (0.9ms)\n")["blame"], "code")
+        self.assertEqual(self.settle(tests, "✖ tips (0.4ms)\n✔ the contract examples hold (0.9ms)\n✖ failing tests:\n✖ tips\n")["blame"], "test")
+        self.assertIsNone(self.settle(tests, "✖ tips (0.4ms)\nTypeError: bill.toFixed is not a function\n"))
+        self.assertIsNone(self.settle(self.TESTS, "✖ tips (0.4ms)\n"))  # no examples to go by: the reviewer decides
+        wrong = tests.replace("tipFor(200, 10), 20", "tipFor(100, 15), 16")
+        self.assertIn("expects 16 for tipFor(100, 15)", self.settle(wrong, "✖ tips\n")["reason"])
+        extra = tests.replace("{ tipFor }", "{ tipFor, roundTip }")
+        self.assertIn("roundTip, which the contract doesn't have", self.settle(extra, "")["reason"])
+        missing = "SyntaxError: The requested module '../app/tip.js' does not provide an export named 'tipFor'"
+        self.assertEqual(self.settle(tests, missing, code="export const x = 1;\n")["blame"], "code")
+        clash = {**self.TIP_CONTRACT, "exports": [export("tipFor", "function tipFor(bill, percent) -> number", examples=[
+            {"call": "tipFor(100, 15)", "returns": "15"}, {"call": "tipFor(100,15)", "returns": "15.5"}])]}
+        self.assertEqual(self.settle(tests, "✖ tips\n", contract=clash)["blame"], "contract")
+
+    def test_the_reviewer_must_quote_the_contract_to_blame_it(self):
+        from rclocal.blame import failed_tests, quoted
+
+        brief = "app/tip.js\n- function tipFor(bill, percent) -> number: the tip for a bill"
+        self.assertTrue(quoted("tipFor(bill, percent) -> number", brief))
+        self.assertFalse(quoted("tipFor(bill, people)", brief))
+        self.assertFalse(quoted("", brief))
+        self.assertEqual(failed_tests("FAIL: test_x (tests.test_app_a.ATest.test_x)\n"), ["test_x (tests.test_app_a.ATest.test_x)"])
 
 
 class FailureDigestTest(unittest.TestCase):

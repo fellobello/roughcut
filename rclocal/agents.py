@@ -365,7 +365,9 @@ async def review(sched, brief, test_code, code, failure, rules=""):
         "description and the rules what the right value is, then compare it with the failure's actual and expected "
         "values. If the actual value is the right one, the code is not to blame: blame 'contract' when a wrong value "
         "is one of the contract's examples, 'test' when it's only in the test file. Give the reason in one or two "
-        f"sentences. {JSON_ONLY}"
+        "sentences. To blame the contract, put in quote the exact words of the contract that can't work, copied "
+        "from it; without a quote the blame goes to the code. For 'code' or 'test', quote is an empty string. "
+        f"{JSON_ONLY}"
     )
     user = (
         _section(RULES, rules)
