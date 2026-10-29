@@ -39,6 +39,7 @@ DEFAULT_CONFIG = {
         "user": "qwen3:8b",
         "reviewer": "qwen3:8b",
         "reporter": "qwen3:8b",
+        "decider": "nimble",  # a decision model (ollama pull nimble); without it the reviewer decides
     },
     # Thinking is off: on the reviewer it took 1.5 to 4 minutes a call for the same verdict.
     "think": {"brainstormer": False, "planner": False, "user": False, "reviewer": False, "reporter": False},

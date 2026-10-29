@@ -89,6 +89,30 @@ class Scheduler:
             self._per_model[model] = asyncio.Semaphore(self._slots.get(model, 1))
         return self._per_model[model]
 
+    async def decide(self, role, state, question, label):
+        """One choice from the role's decision model. Returns {choice, confidence}."""
+        model = self.models[role]
+        if self.cancel():
+            raise Interrupted()
+        async with self._model_lock(model), self._all:
+            if self.cancel():
+                raise Interrupted()
+            call = next(self._ids)
+            self.events.emit("llm_start", call=call, role=role, model=model, label=label)
+            self.live.start(call, role, model, label)
+            try:
+                answer, stats = await asyncio.to_thread(self.llm.decide, model, state, question)
+            except LLMError as e:
+                self.live.end(call, "failed")
+                self.events.emit("llm_error", call=call, role=role, model=model, label=label, error=str(e))
+                raise
+            self.live.update(call, f"{answer['choice']} ({answer['confidence']:.0%} sure)", "")
+            self.live.end(call, "done")
+            self.events.emit("llm_end", call=call, role=role, model=model, label=label, seconds=round(stats.seconds, 2),
+                             prompt_tokens=stats.prompt_tokens, output_tokens=stats.output_tokens,
+                             tokens_per_second=stats.tokens_per_second, cut_off=False)
+            return answer
+
     async def ask(self, role, messages, label, reply=None):
         """One call on the role's model, given the conversation so far.
 

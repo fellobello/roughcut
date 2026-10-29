@@ -160,6 +160,8 @@ class Script:
             }
         if role == "designer":
             return "```html\n" + PAGE + "\n```" if "## Idea" in user else "```css\n" + CSS + "\n```"
+        if role == "decider":
+            return {"choice": self.verdict, "confidence": 0.9}
         if role == "reviewer":
             return {"blame": self.verdict, "reason": "it subtracts but never scales",
                     "quote": "to_celsius(f: float) -> float" if self.verdict == "contract" else ""}
@@ -195,7 +197,7 @@ class HubCase(unittest.TestCase):
 
 class ProtocolTest(unittest.TestCase):
     def test_every_role_replies_with_data_or_code(self):
-        data_roles = {"brainstormer", "planner", "surveyor", "user", "reviewer", "reporter"}
+        data_roles = {"brainstormer", "planner", "surveyor", "user", "reviewer", "reporter", "decider"}
         self.assertEqual(set(protocol.ROLES), data_roles | set(protocol.CODE_ROLES))
         kinds = {"brainstorm", "planner", "split", "survey", "step", "notes", "page_part", "user_plan", "user_verdict",
                  "checklist", "reviewer", "reporter"}
@@ -1482,6 +1484,44 @@ class BlameTest(unittest.TestCase):
         self.assertFalse(quoted("tipFor(bill, people)", brief))
         self.assertFalse(quoted("", brief))
         self.assertEqual(failed_tests("FAIL: test_x (tests.test_app_a.ATest.test_x)\n"), ["test_x (tests.test_app_a.ATest.test_x)"])
+
+
+class DeciderTest(HubCase):
+    """Who is wrong, when the facts don't say: the decision model, and the reviewer when there isn't one."""
+
+    def judge(self, decider):
+        def respond(role, model, system, user, schema):
+            if role == "decider":
+                return decider
+            assert role == "reviewer", role
+            return {"blame": "contract", "reason": "no input for the scale", "quote": ""}
+
+        rnd = Round(self.hub, FakeLLM(respond))
+        rnd.number = 0
+        rnd.apply_plan(plan_of([CONVERT, REPORT]))
+        contract = self.hub.contracts.get("app/convert.py")
+        return rnd, asyncio.run(rnd.judge(contract, PY_TESTS["tests/test_app_convert.py"], CONVERT_BAD, "FAIL: test_boiling"))
+
+    def test_the_decider_says_who_is_wrong(self):
+        rnd, (verdict, how) = self.judge({"choice": "test", "confidence": 0.81})
+        self.assertEqual((verdict["blame"], how), ("test", "decider, 81% sure"))
+        self.assertIn("FAIL: test_boiling", verdict["reason"])
+        call = rnd.sched.llm.calls[-1]
+        self.assertIn("def to_celsius", json.loads(call["user"])["contract"])
+
+    def test_without_a_decider_the_reviewer_decides_and_must_quote(self):
+        rnd, (verdict, how) = self.judge({})  # no choice: as if nimble isn't installed
+        self.assertEqual((verdict["blame"], how), ("code", "reviewer"))  # it blamed the contract without a quote
+        self.assertFalse(rnd.decider_ok)
+
+    @unittest.skipUnless(os.environ.get("RC_REAL_DECIDER"), "set RC_REAL_DECIDER=1 to ask the real nimble once")
+    def test_the_real_decision_model_answers(self):
+        from rclocal.agents import BLAME_QUESTION
+
+        answer, stats = OllamaClient().decide("nimble", {"failure": "a test imports roundTip, which the contract doesn't have"},
+                                              BLAME_QUESTION)
+        self.assertIn(answer["choice"], BLAME_QUESTION["criteria"])
+        self.assertTrue(0 <= answer["confidence"] <= 1)
 
 
 class SharedFunctionTest(HubCase):

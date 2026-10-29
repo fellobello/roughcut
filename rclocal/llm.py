@@ -7,6 +7,9 @@ because a small model that loses track can otherwise write until the call times 
 and both report when a reply was cut off by that cap. FakeLLM has the same interface
 and answers from a function, for tests.
 
+A decision model (like nimble) is asked through `decide`: it picks one of the options it's
+given and says how sure it is, with no text to stream or check.
+
 Replies are streamed: `live`, if given, is called with the text so far (and any thinking)
 as it arrives, which is how the studio shows what each model is writing. It can raise
 Interrupted to stop the call partway; closing the stream stops Ollama generating too.
@@ -147,6 +150,34 @@ class OllamaClient:
         extra = {"stop": [stop]} if stop else {}
         return self._chat(model, messages, stats, think, max_tokens, live, **extra), stats
 
+    def decide(self, model, state, question):
+        """Ask a decision model one choice question (Ollama's /v1/systemone). Returns ({choice, confidence}, Stats).
+
+        `question` is {"instructions": ..., "criteria": {option: description}}.
+        """
+        body = {"model": model, "state": state, "keep_alive": self.keep_alive,
+                "questions": {"q": {"type": "choice", **question}}}
+        req = urllib.request.Request(self.host + "/v1/systemone", data=json.dumps(body).encode(),
+                                     headers={"Content-Type": "application/json"})
+        start = time.monotonic()
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                reply = json.load(resp)
+        except urllib.error.HTTPError as e:
+            raise LLMError(f"Ollama /v1/systemone said {e.code}: {e.read().decode(errors='replace')[:300]}") from e
+        except TimeoutError as e:
+            raise LLMError(f"no decision within {self.timeout}s") from e
+        except (urllib.error.URLError, OSError) as e:
+            raise LLMError(f"can't reach Ollama at {self.host} ({e}); is `ollama serve` running?") from e
+        except ValueError as e:
+            raise LLMError(f"Ollama sent something that isn't JSON: {e}") from e
+        answer = (reply.get("answers") or {}).get("q") or {}
+        if answer.get("choice") not in question["criteria"]:
+            raise LLMError(f"{model} gave no choice: {str(reply)[:200]}")
+        usage = reply.get("usage") or {}
+        stats = Stats(time.monotonic() - start, usage.get("input_tokens", 0), usage.get("output_tokens", 0))
+        return {"choice": answer["choice"], "confidence": float(answer.get("confidence", 0))}, stats
+
     def loaded(self):
         """Models Ollama has in memory now, with their sizes (from /api/ps)."""
         return self._get("/api/ps").get("models", [])
@@ -189,6 +220,14 @@ class FakeLLM:
         if live:
             live(text, "")
         return text, Stats(self.seconds, 10, 10)
+
+    def decide(self, model, state, question):
+        """The role is "decider", system is the question's instructions and user the state, as JSON."""
+        self.calls.append({"model": model, "system": question["instructions"], "user": json.dumps(state), "messages": []})
+        answer = self.respond("decider", model, question["instructions"], json.dumps(state), question)
+        if answer.get("choice") not in question["criteria"]:
+            raise LLMError(f"{model} gave no choice")
+        return answer, Stats(self.seconds, 10, 1)
 
     def loaded(self):
         return []

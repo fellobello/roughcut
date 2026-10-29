@@ -167,6 +167,7 @@ class Round:
         self.requests = []  # (task id, contract request), applied between tasks
         self.number = None
         self.page_checked = False  # a page passed its check this round, so the test users try it
+        self.decider_ok = True  # until a decision call fails: then the reviewer decides
         self.cancel = cancel
         self.examples_asked = None  # when this round's plan asked you to check examples (time.monotonic())
 
@@ -852,12 +853,7 @@ class Round:
         test_code = test_file.read_text(encoding="utf-8") if test_file.exists() else ""
         verdict, how = blame.settle(self.stack, contract, test_code, code, failure), "settled by the facts"
         if verdict is None:
-            brief = hub.contracts.brief(contract["path"])
-            verdict, how = await agents.review(self.sched, brief, test_code, code, failure_digest(failure, 2500),
-                                               self.rules()), "reviewer"
-            if verdict["blame"] == "contract" and not blame.quoted(verdict.get("quote", ""), brief):
-                verdict = {"blame": "code", "reason": f"{verdict['reason'].strip()} (the reviewer blamed the contract "
-                                                      "but quoted no line of it, so the code gets another try)"}
+            verdict, how = await self.judge(contract, test_code, code, failure)
         reason = verdict["reason"].strip() or "no reason given"
         self.events.emit("note", text=f"review of {contract['path']} ({how}): blame {verdict['blame']}: {reason}")
         hub.set_field(task["id"], "blame", verdict["blame"])
@@ -887,6 +883,26 @@ class Round:
         return (*self.hand_over(task, contract, code, f"{what}: {reason}", failure), None)
 
     # Splitting a file the builder can't get right
+
+    async def judge(self, contract, test_code, code, failure):
+        """Who is wrong, when the facts don't say: the decision model, or the reviewer without one. Returns (verdict, how)."""
+        brief = self.hub.contracts.brief(contract["path"])
+        if self.decider_ok:
+            try:
+                answer = await agents.decide_blame(self.sched, brief, test_code, code, failure_digest(failure, 1500),
+                                                   [l.removeprefix("- ") for l in self.rules().splitlines()])
+                shown = re.sub(r"\s+", " ", re.sub(r"[=-]{8,}", " ", failure_digest(failure, 500))).strip()[:300]
+                return ({"blame": answer["choice"], "reason": f"the decider says the {answer['choice']} is wrong "
+                                                              f"({answer['confidence']:.0%} sure); the failure: {shown}"},
+                        f"decider, {answer['confidence']:.0%} sure")
+            except LLMError as e:
+                self.decider_ok = False  # not installed, or Ollama too old: the reviewer decides for the rest of the round
+                self.events.emit("note", text=f"no decision model ({e}); the reviewer decides who is wrong instead")
+        verdict = await agents.review(self.sched, brief, test_code, code, failure_digest(failure, 2500), self.rules())
+        if verdict["blame"] == "contract" and not blame.quoted(verdict.get("quote", ""), brief):
+            verdict = {"blame": "code", "reason": f"{verdict['reason'].strip()} (the reviewer blamed the contract "
+                                                  "but quoted no line of it, so the code gets another try)"}
+        return verdict, "reviewer"
 
     def can_split(self, contract):
         """A file is split at most once, and a piece of a split file is never split again."""

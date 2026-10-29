@@ -72,7 +72,10 @@ have, or expect something else than the contract's own example for the same call
 wrong; code that fails the contract's examples is wrong; code that meets every example
 while the tester's extra tests fail means the tests asked for more than the contract
 promises; a contract that gives two results for one call is wrong. Only what's left goes to
-the reviewer, which may blame the contract only by quoting the words that can't work.
+the decider, a decision model (nimble by default) that picks code, test or contract and
+says how sure it is. In a replay of the SplitTip runs it got 20 of 21 past verdicts right,
+against 13 for qwen3:8b. Without it (not pulled, or an Ollama older than 0.35) the reviewer
+decides, and may blame the contract only by quoting the words that can't work.
 
 **You check the examples.** Small models get arithmetic wrong, and one wrong example fails a
 file that's right. So every new example a plan writes comes up in Talk as "Is this right?
@@ -158,7 +161,8 @@ Every role has one job and its own model in `.hub/local.json` (the list is
 | builder | Owns one file and works in steps until its tests pass |
 | designer | Makes the page from the kit, and later fixes only the part of it that's wrong |
 | user | A test user who tries the finished page, knowing nothing of the code |
-| reviewer | Decides whether the code, the test or the contract is wrong when a file keeps failing |
+| reviewer | Decides whether the code, the test or the contract is wrong when a file keeps failing, when there's no decider |
+| decider | A decision model (`ollama pull nimble`) that picks who is wrong when the facts don't say; it chooses from the options and says how sure it is |
 | reporter | Writes the round summary |
 
 ## How it works

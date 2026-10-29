@@ -370,6 +370,25 @@ async def design_styles(sched, html, notes):
     return await sched.ask("designer", _chat(system, user), "design:styles.css")
 
 
+BLAME_QUESTION = {
+    "instructions": "A file keeps failing its tests. Who is wrong? Small models wrote the contract's examples, the tests "
+                    "and the code, and the owner's rules come first.",
+    "criteria": {
+        "code": "The code breaks its contract or the owner's rules, so the code must change.",
+        "test": "A test expects something the contract doesn't promise, uses the wrong API, or breaks the owner's rules.",
+        "contract": "The contract can't work as written: its examples are wrong, it contradicts the owner's rules, "
+                    "or a function is missing an input.",
+    },
+}
+
+
+async def decide_blame(sched, brief, test_code, code, failure, rules=()):
+    """Who is wrong, from the decision model: {choice, confidence}. It sees what the reviewer would."""
+    state = {"owner_rules": list(rules), "contract": brief[:3000], "tests": test_code[:3000], "code": code[:3000],
+             "failure": failure}
+    return await sched.decide("decider", state, BLAME_QUESTION, "decide:blame")
+
+
 async def review(sched, brief, test_code, code, failure, rules=""):
     system = (
         f"Reviewer: {TEAM}\n"
