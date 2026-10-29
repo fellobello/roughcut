@@ -16,10 +16,10 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import project
+from . import chat, project
 from .desk import Desk
-from .hub_local import HubError
-from .llm import LLMError, OllamaClient
+from .hub_local import DEFAULT_CONFIG, HubError
+from .llm import Interrupted, LLMError, OllamaClient
 from .status import resources, snapshot
 
 PAGE = Path(__file__).with_name("studio.html")
@@ -116,6 +116,36 @@ def make_server(desk, port=8770, host="127.0.0.1"):
             else:
                 self.send(404, {"error": "not found"})
 
+        def chat(self, body):
+            """Stream a chat reply as plain text, chunk by chunk, until the model is done or the page stops reading."""
+            hub = desk.hub
+            llm = desk.llm_for(hub) if hub else OllamaClient()
+            model = (hub.local_config() if hub else DEFAULT_CONFIG)["models"]["chat"]
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.close_connection = True
+            sent = [0]
+
+            def live(text):
+                try:
+                    self.wfile.write(text[sent[0]:].encode())
+                    self.wfile.flush()
+                except OSError as e:
+                    raise Interrupted() from e  # you stopped it or left the tab: stop the model too
+                sent[0] = len(text)
+
+            try:
+                live(chat.reply(llm, model, body.get("messages") or [], hub, live))
+            except Interrupted:
+                pass
+            except LLMError as e:
+                try:
+                    self.wfile.write(f"\n\n(The chat model failed: {e})".encode())
+                except OSError:
+                    pass
+
         def do_POST(self):
             if not self.host_ok():
                 return
@@ -123,6 +153,10 @@ def make_server(desk, port=8770, host="127.0.0.1"):
                 self.send(403, {"error": "missing or wrong token"})
                 return
             name = self.path.removeprefix("/api/")
+            if name == "chat":
+                length = int(self.headers.get("Content-Length") or 0)
+                self.chat(json.loads(self.rfile.read(length) or b"{}"))
+                return
             if name not in actions:
                 self.send(404, {"error": f"no action {name}"})
                 return

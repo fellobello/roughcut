@@ -29,7 +29,7 @@ Or do all of it from one page in your browser:
 ```
 
 The studio (http://127.0.0.1:8770) has your projects on the left (open one, start a new
-one, or bring in existing code from a folder or GitHub repo), the project's files below that, and five tabs:
+one, or bring in existing code from a folder or GitHub repo), the project's files below that, and six tabs:
 
 - **Talk**: chat with the brainstormer. Its questions come up one at a time in their own box,
   each answer 2 or 3 words, with what it means when you hover over it; ★ marks its pick.
@@ -39,6 +39,13 @@ one, or bring in existing code from a folder or GitHub repo), the project's file
   Answered one wrong? **Change** under your answer brings its options back; changing an
   answer rebuilds whatever was built on it. The message box stays on the bottom edge of
   the window, and **Stop** replaces Build while something runs.
+- **Chat**: one temporary conversation with the `chat` model (qwen3:8b), which sees the open
+  project as it is now: the brief, the contracts, how each task stands and why, the
+  questions, the last round's report, what the test users saw and the latest notes. Ask
+  why a file is stuck or what a round did. It reads only, never changes anything, and
+  keeps nothing: switch tabs and back to start a new chat. **Stop** cuts a reply off. It
+  sees no code and no page, and qwen3:8b still sometimes says the page does what the
+  rules ask when nothing it was given says so.
 - **Editor**: open any file from **Files** (the tree under the folder picker; files left for
   you have an orange dot). It shows the language, line numbers and whether it's saved; ⌘S
   saves. Beside the code: what the file must do (its contract and examples), and **Run its

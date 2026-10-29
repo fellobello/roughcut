@@ -252,6 +252,7 @@ h1 { letter-spacing: .02em; } h2, .msg .who, th { letter-spacing: .14em; }
 <main>
   <div class="tabs" id="tabs">
     <button class="tab on" data-tab="talk">Talk<span class="n" id="qn" hidden></span></button>
+    <button class="tab" data-tab="ask">Chat</button>
     <button class="tab" data-tab="editor">Editor</button>
     <button class="tab" data-tab="build">Progress</button>
     <button class="tab" data-tab="app">App</button>
@@ -268,6 +269,17 @@ h1 { letter-spacing: .02em; } h2, .msg .who, th { letter-spacing: .14em; }
         <span style="flex:1"></span>
         <label class="muted">Rounds <input class="input" id="rounds" type="number" min="1" max="10" placeholder="auto" style="width:70px"></label>
         <button class="btn primary" id="buildBtn">Build</button><button class="btn stop" id="stopTalk" hidden>Stop</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel" id="ask">
+    <div class="card"><div class="chat" id="askbox"><div class="chatlog" id="asklog"></div></div></div>
+    <div class="card stack">
+      <textarea id="askText" placeholder="Ask about this project, or anything else (Enter sends, Shift+Enter for a new line)"></textarea>
+      <div class="row">
+        <button class="btn primary" id="askBtn">Send</button><button class="btn stop" id="askStop" hidden>Stop</button>
+        <span class="muted" style="font-size:13px">It sees the project as it is now. Nothing is kept: switch tabs to start over.</span>
       </div>
     </div>
   </section>
@@ -366,6 +378,7 @@ function side(which, open) {
 
 document.querySelectorAll(".tab").forEach(t => t.onclick = () => showTab(t.dataset.tab));
 function showTab(name) {
+  if (activeTab === "ask" && name !== "ask") resetChat();  // leaving the chat starts a fresh one
   activeTab = name;
   document.querySelectorAll(".tab").forEach(x => x.classList.toggle("on", x.dataset.tab === name));
   document.querySelectorAll(".panel").forEach(p => p.classList.toggle("on", p.id === name));
@@ -539,6 +552,60 @@ function asking(s) {
   $("chatbox").scrollTop = $("chatbox").scrollHeight;
 }
 
+
+// Chat: one temporary conversation, kept only here in the page. The server streams each
+// reply as plain text; Stop (or leaving the tab) cancels the request, which stops the model.
+let chatTurns = [], chatAbort = null;
+// A reply's markdown, lightly: headings and **bold** in bold, `code` as code, rules dropped. Escaped first.
+const md = t => esc(t).replace(/^#{1,4}\s*(.+)$/gm, "<b>$1</b>").replace(/^\s*-{3,}\s*$/gm, "")
+  .replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>").replace(/`([^`\n]+)`/g, "<code>$1</code>").replace(/\n{3,}/g, "\n\n");
+function drawChat() {
+  $("asklog").innerHTML = chatTurns.length ? chatTurns.map(m =>
+    `<div class="msg ${m.role === "user" ? "you" : "brainstormer"}"><div class="who">${m.role === "user" ? "You" : "chat"}</div>${
+      m.role === "user" ? esc(m.content) : md(m.content)}</div>`).join("")
+    : `<div class="empty">${state && state.project ? "Ask why a file is stuck, what a round did, what a contract promises…" : "Ask anything. Open a project to ask about it."}</div>`;
+  $("askbox").scrollTop = $("askbox").scrollHeight;
+}
+function resetChat() {
+  if (chatAbort) chatAbort.abort();
+  chatTurns = []; chatAbort = null;
+  $("askBtn").disabled = false; $("askStop").hidden = true;
+  drawChat();
+}
+async function sendChat() {
+  const text = $("askText").value.trim();
+  if (!text || chatAbort) return;
+  $("askText").value = "";
+  chatTurns.push({ role: "user", content: text });
+  const answer = { role: "assistant", content: "" };
+  chatTurns.push(answer);
+  const ctl = chatAbort = new AbortController();
+  $("askBtn").disabled = true; $("askStop").hidden = false;
+  drawChat();
+  try {
+    const r = await fetch("api/chat", { method: "POST", signal: ctl.signal,
+      headers: { "Content-Type": "application/json", "X-Token": TOKEN },
+      body: JSON.stringify({ messages: chatTurns.slice(0, -1) }) });
+    const reader = r.body.getReader(), dec = new TextDecoder();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      answer.content += dec.decode(value, { stream: true });
+      drawChat();
+    }
+  } catch (e) {
+    if (ctl.signal.aborted) answer.content += answer.content ? " (stopped)" : "(stopped)";
+    else answer.content += `(couldn't reach the studio: ${e.message})`;
+  }
+  if (chatAbort !== ctl) return;  // the chat was reset meanwhile
+  chatAbort = null;
+  $("askBtn").disabled = false; $("askStop").hidden = true;
+  drawChat();
+}
+$("askBtn").onclick = sendChat;
+$("askStop").onclick = () => chatAbort && chatAbort.abort();
+$("askText").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); } });
+drawChat();
 
 // Questions wait in Talk; on any other tab, say so.
 function waitingNote(s) {

@@ -181,6 +181,7 @@ ROLE_JOBS = {
     "designer": "makes the page from the kit, and later fixes only the part of it that's wrong",
     "user": "a test user who tries the finished page and says what's wrong, knowing nothing of the code",
     "reviewer": "decides whether the code, the test or the contract is wrong when a file keeps failing",
+    "chat": "the Chat tab: answers you about the open project from what roughcut recorded, and changes nothing",
     "decider": "a decision model that picks one of a few options where the facts can't decide (who is wrong when a "
                "file keeps failing); the reviewer stands in when it isn't installed",
     "reporter": "writes the round summary",

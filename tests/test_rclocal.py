@@ -197,7 +197,7 @@ class HubCase(unittest.TestCase):
 
 class ProtocolTest(unittest.TestCase):
     def test_every_role_replies_with_data_or_code(self):
-        data_roles = {"brainstormer", "planner", "surveyor", "user", "reviewer", "reporter", "decider"}
+        data_roles = {"brainstormer", "planner", "surveyor", "user", "reviewer", "reporter", "decider", "chat"}
         self.assertEqual(set(protocol.ROLES), data_roles | set(protocol.CODE_ROLES))
         kinds = {"brainstorm", "planner", "split", "survey", "step", "notes", "page_part", "user_plan", "user_verdict",
                  "checklist", "reviewer", "reporter"}
@@ -1215,7 +1215,7 @@ class DeskTest(unittest.TestCase):
             self.desk.set_model("wizard", "x")
 
 
-class StudioTest(unittest.TestCase):
+class StudioCase(unittest.TestCase):
     def setUp(self):
         from rclocal.desk import Desk
         from rclocal.studio import make_server
@@ -1244,6 +1244,9 @@ class StudioTest(unittest.TestCase):
         except urllib.error.HTTPError as e:
             return e.code, e.read()
 
+
+
+class StudioTest(StudioCase):
     def test_changes_need_the_token_and_the_right_host(self):
         self.assertEqual(self.call("/api/new", {"idea": "x"}, token=False)[0], 403)
         self.assertEqual(self.call("/api/state", host="evil.example:80")[0], 403)
@@ -1263,6 +1266,41 @@ class StudioTest(unittest.TestCase):
         self.assertIn("tasks", state["status"])
         self.assertEqual(self.call("/api/model", {"role": "user", "model": "llama3.2:3b"})[0], 200)
         self.assertEqual(hub.local_config()["models"]["user"], "llama3.2:3b")
+
+
+class ChatTest(StudioCase):
+    """The Chat tab: one temporary conversation that sees the open project and keeps nothing."""
+
+    def test_a_chat_reply_streams_and_knows_the_project(self):
+        from rclocal.desk import Desk
+        from rclocal.rounds import Round
+
+        llm = FakeLLM(lambda role, model, system, user, schema: "app/convert.py is stuck because it never scales.")
+        self.desk.llm_for = lambda hub: llm
+        hub = LocalHub(Path(os.environ["ROUGHCUT_PROJECTS"]) / "chat-test")
+        hub.init("A temperature converter", {"stack": "python"})
+        rnd = Round(hub, FakeLLM(None))
+        rnd.number = 0
+        rnd.apply_plan(plan_of([CONVERT, REPORT]))
+        hub.events.emit("note", text="review of app/convert.py (decider, 80% sure): blame code")
+        self.assertEqual(self.call("/api/open", {"path": str(hub.project)})[0], 200)
+        self.assertEqual(self.call("/api/chat", {"messages": [{"role": "user", "content": "hi"}]}, token=False)[0], 403)
+        status, body = self.call("/api/chat", {"messages": [{"role": "user", "content": "why is convert stuck?"}]})
+        self.assertEqual((status, body.decode()), (200, "app/convert.py is stuck because it never scales."))
+        system = llm.calls[-1]["messages"][0]["content"]
+        for seen in ("def to_celsius(f: float) -> float", "app-convert-py (build): todo", "blame code", "temperature converter"):
+            self.assertIn(seen, system)
+        self.assertEqual(llm.calls[-1]["messages"][-1], {"role": "user", "content": "why is convert stuck?"})
+        self.assertFalse(any("chat" in p.name for p in hub.root.iterdir()))  # nothing kept
+
+    def test_a_long_chat_keeps_the_latest_turns(self):
+        from rclocal.chat import HISTORY_CHARS, messages_for
+
+        history = [{"role": "user" if i % 2 == 0 else "assistant", "content": f"{i} " + "x" * 3000} for i in range(10)]
+        kept = messages_for(history, "ctx")
+        self.assertEqual(kept[-1]["content"].split()[0], "9")
+        self.assertLessEqual(sum(len(m["content"]) for m in kept[1:]), HISTORY_CHARS + 3100)
+        self.assertLess(len(kept), 11)
 
 
 def ollama_up():
