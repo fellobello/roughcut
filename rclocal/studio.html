@@ -102,6 +102,11 @@ textarea { resize: vertical; min-height: 64px; }
 .waiting { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 30; background: var(--accent);
   color: var(--accent-ink); border: 0; border-radius: 999px; padding: 9px 18px; font-weight: 600; cursor: pointer;
   box-shadow: 0 6px 20px rgb(0 0 0 / 25%); }
+.game { display: grid; gap: 8px; justify-items: center; }
+.game canvas { border-radius: 10px; background: var(--panel-2); outline: none; cursor: pointer; }
+.game canvas:focus { box-shadow: 0 0 0 2px var(--accent); }
+.game .muted { font-size: 12px; text-align: center; }
+.scores { margin: 0; padding-left: 22px; font-size: 12px; color: var(--ink-2); width: 100%; }
 .steps { display: flex; gap: 6px; align-items: center; margin-top: 12px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line); }
 .dot.on { background: var(--accent); }
@@ -319,6 +324,12 @@ h1 { letter-spacing: .02em; } h2, .msg .who, th { letter-spacing: .14em; }
     <ol class="stages" id="stages"></ol>
   </section>
   <section><h2>Now</h2><div id="now" class="muted" style="font-size:13px">Nothing running.</div></section>
+  <section class="game">
+    <h2 style="justify-self:start">While you wait</h2>
+    <canvas id="drop" width="128" height="240" tabindex="0" aria-label="Drop: a falling-block game. Click it, then use the arrow keys"></canvas>
+    <div class="muted" id="dropHint">Click to play. ← → move, ↓ drop faster, ↑ turn.</div>
+    <ol class="scores" id="dropScores"></ol>
+  </section>
 </aside>
 <button class="waiting" id="waiting" hidden></button>
 </div>
@@ -660,6 +671,82 @@ $("edTest").onclick = async () => {
   } catch (e) { $("edOutTitle").textContent = "Its tests"; $("edOutText").textContent = String(e.message || e); }
 };
 addEventListener("beforeunload", e => { if (dirty()) { e.preventDefault(); e.returnValue = ""; } });
+
+// Drop: a small falling-block game for while a round runs. Pieces of one to three blocks
+// (and now and then a five-block cross) fall into an 8-wide well; a full row clears. Arrow
+// keys only, while the board has focus. When the well fills, the score joins the list and a
+// new game starts. Scores are kept in this browser only.
+const drop = (() => {
+  const W = 8, H = 15, C = 16, cv = $("drop"), g = cv.getContext("2d"), KEY = "rc.drop.scores";
+  const SHAPES = [[[0, 0]], [[0, 0], [1, 0]], [[0, 0], [1, 0], [2, 0]], [[0, 0], [1, 0], [0, 1]], [[0, 0], [1, 1]],
+                  [[1, 0], [0, 1], [1, 1], [2, 1], [1, 2]]];
+  const WEIGHTS = [2, 4, 4, 4, 2, 1];
+  let well, piece, score, rows, timer = null, last = 0;
+  const scores = () => { try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch (e) { return []; } };
+  const color = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  function pick() {
+    let r = Math.random() * WEIGHTS.reduce((a, b) => a + b);
+    const i = WEIGHTS.findIndex(w => (r -= w) < 0);
+    const cells = SHAPES[i].map(c => c.slice());
+    return { cells, x: Math.floor((W - 3) / 2), y: 0, hue: i };
+  }
+  const fits = (cells, x, y) => cells.every(([cx, cy]) => {
+    const px = cx + x, py = cy + y;
+    return px >= 0 && px < W && py < H && (py < 0 || !well[py][px]);
+  });
+  function fresh() { well = Array.from({ length: H }, () => Array(W).fill(0)); piece = pick(); score = 0; rows = 0; }
+  function lose() {
+    const list = [...scores(), { score, rows, when: new Date().toLocaleDateString() }]
+      .sort((a, b) => b.score - a.score).slice(0, 5);
+    try { localStorage.setItem(KEY, JSON.stringify(list)); } catch (e) {}
+    showScores(); fresh();
+  }
+  function land() {
+    piece.cells.forEach(([cx, cy]) => { if (cy + piece.y >= 0) well[cy + piece.y][cx + piece.x] = piece.hue + 1; });
+    const kept = well.filter(r => r.some(c => !c)), cleared = H - kept.length;
+    well = [...Array.from({ length: cleared }, () => Array(W).fill(0)), ...kept];
+    rows += cleared; score += piece.cells.length + cleared * cleared * 10;
+    piece = pick();
+    if (!fits(piece.cells, piece.x, piece.y)) lose();
+  }
+  function step() { if (fits(piece.cells, piece.x, piece.y + 1)) piece.y++; else land(); }
+  function turn() {
+    const size = Math.max(...piece.cells.flat()) ;
+    const cells = piece.cells.map(([x, y]) => [size - y, x]);
+    for (const kick of [0, -1, 1]) if (fits(cells, piece.x + kick, piece.y)) { piece.cells = cells; piece.x += kick; return; }
+  }
+  const speed = () => Math.max(160, 650 - rows * 25);
+  function draw() {
+    g.fillStyle = color("--panel-2"); g.fillRect(0, 0, cv.width, cv.height);
+    const hues = ["--accent", "--ok", "--warn", "--bad", "--ink-3", "--accent"];
+    const cell = (x, y, n) => { g.fillStyle = color(hues[n % hues.length]); g.fillRect(x * C + 1, y * C + 1, C - 2, C - 2); };
+    well.forEach((r, y) => r.forEach((c, x) => c && cell(x, y, c - 1)));
+    piece.cells.forEach(([cx, cy]) => cy + piece.y >= 0 && cell(cx + piece.x, cy + piece.y, piece.hue));
+    g.fillStyle = color("--ink-2"); g.font = "600 12px system-ui"; g.fillText(`${score}`, 4, 14);
+  }
+  function tick(t) {
+    if (document.activeElement !== cv) { timer = null; return; }
+    if (t - last > speed()) { last = t; step(); }
+    draw(); timer = requestAnimationFrame(tick);
+  }
+  function showScores() {
+    const list = scores();
+    $("dropScores").innerHTML = list.length ? list.map(s => `<li>${s.score} <span class="muted">· ${s.rows} rows · ${esc(s.when)}</span></li>`).join("")
+      : '<li class="muted" style="list-style:none;margin-left:-22px">No scores yet.</li>';
+  }
+  cv.addEventListener("keydown", e => {
+    const moves = { ArrowLeft: () => fits(piece.cells, piece.x - 1, piece.y) && piece.x--,
+                    ArrowRight: () => fits(piece.cells, piece.x + 1, piece.y) && piece.x++,
+                    ArrowDown: () => { step(); score++; }, ArrowUp: turn };
+    if (!moves[e.key]) return;
+    e.preventDefault(); moves[e.key](); draw();
+  });
+  cv.addEventListener("focus", () => { $("dropHint").textContent = "← → move, ↓ drop faster, ↑ turn."; if (!timer) timer = requestAnimationFrame(tick); });
+  cv.addEventListener("blur", () => { $("dropHint").textContent = "Paused. Click to keep playing."; });
+  cv.addEventListener("click", () => cv.focus());
+  fresh(); draw(); showScores();
+  return { draw };
+})();
 
 async function refresh() {
   let s;
