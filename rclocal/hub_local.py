@@ -47,6 +47,7 @@ DEFAULT_CONFIG = {
     "max_parallel_tasks": 3,  # tasks per wave
     "agent_steps": 14,  # actions a builder agent may take per attempt
     "design_tries": 3,  # page attempts before the design task gives up
+    "example_wait": 120,  # seconds a file's tests wait for you to check its examples before going with them
     "test_users": 3,  # test users who try each new page (0 turns them off)
     "user_fixes": 2,  # times test users may send the page back, across all rounds
     "brainstorm_turns": 4,  # most back-and-forth turns before building starts
@@ -123,10 +124,11 @@ class LocalHub(Hub):
 
     # Tasks without worktrees
 
-    def start_tasks(self, limit=None, first=()):
+    def start_tasks(self, limit=None, first=(), hold=()):
         """Mark up to `limit` ready tasks in progress, the ids in `first` before the rest.
 
-        Each owns one file, so there is nothing to check out.
+        Tasks in `hold` wait (tests whose examples you haven't checked yet). Each owns one
+        file, so there is nothing to check out.
         """
         with self.locked():
             errors = self.check()
@@ -134,7 +136,8 @@ class LocalHub(Hub):
                 raise HubError("the task graph is invalid: " + "; ".join(errors))
             current = self.config()["round"]
             started = []
-            for task in sorted(self.ready(), key=lambda t: t["id"] not in first)[:limit]:
+            ready = [t for t in self.ready() if t["id"] not in hold]
+            for task in sorted(ready, key=lambda t: t["id"] not in first)[:limit]:
                 task["attempts"] += 1
                 task.update(status="in_progress", round=current)
                 self._save_task(task)
@@ -233,8 +236,21 @@ class LocalHub(Hub):
         return question
 
     def answered_since(self, round_no):
-        """Questions answered after the given round was planned: what a new plan must take in."""
-        return [q for q in self.questions() if q["status"] == "answered" and q.get("answered_round", q["round"]) >= round_no]
+        """Answers no plan has taken in yet: what a new plan must take in.
+
+        An answer given while a round runs still counts for the next plan, however many
+        rounds go by. Answers from before this was tracked count from round `round_no` on.
+        """
+        return [q for q in self.questions() if q["status"] == "answered" and not q.get(
+            "planned", q.get("answered_round", q["round"]) < round_no)]
+
+    def mark_planned(self, question_ids):
+        """Note that a plan has taken in these answers, so the next plan doesn't need them again."""
+        with self.locked():
+            for question_id in question_ids:
+                question = self.question(question_id)
+                question["planned"] = True
+                self._write(self.questions_dir / f"{question_id}.json", question)
 
     def answer(self, question_id, text=None, keep=False):
         result = super().answer(question_id, text, keep)
@@ -242,6 +258,7 @@ class LocalHub(Hub):
             question = self.question(question_id)
             question["answered_round"] = self.config()["round"]
             question["acted"] = False  # a changed answer is acted on again
+            question["planned"] = False  # and planned with again
             self._write(self.questions_dir / f"{question_id}.json", question)
         return result
 

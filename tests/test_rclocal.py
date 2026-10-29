@@ -178,7 +178,7 @@ class HubCase(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.project = Path(self._tmp.name) / "proj"
         self.hub = LocalHub(self.project)
-        self.hub.init("A temperature converter", {"stack": self.stack, "sandbox": False, "agent_steps": 3})
+        self.hub.init("A temperature converter", {"stack": self.stack, "sandbox": False, "agent_steps": 3, "example_wait": 0})
         subprocess.run(["git", "-C", str(self.project), "config", "user.email", "t@example.com"], check=True)
         subprocess.run(["git", "-C", str(self.project), "config", "user.name", "test"], check=True)
 
@@ -400,6 +400,43 @@ class RoundTest(HubCase):
         guess = next(q for q in self.hub.questions() if q["task"] == "app-convert-py")
         self.assertEqual((guess["status"], guess["choice"]), ("decided", I_GOT_IT))
         self.assertEqual(self.statuses()["app-report-py"], "todo")  # only what needs it waits
+
+    def test_simplify_sends_a_stuck_file_back_to_the_planner_with_new_tests(self):
+        from rclocal.hub_local import HUB_OWNER
+        from rclocal.rounds import SIMPLIFY
+
+        self.run_round(py_script({"app/convert.py": [CONVERT_BAD], "app/report.py": [REPORT_GOOD]}))
+        stuck = next(q for q in self.hub.questions() if q["task"] == "app-convert-py")
+        self.hub.answer(stuck["id"], SIMPLIFY)
+        asyncio.run(Round(self.hub, FakeLLM(lambda *a: {})).revisit_stuck())
+        self.assertEqual(self.hub.task("app-convert-py")["status"], "todo")
+        self.assertEqual(self.hub.task("app-convert-py-tests")["status"], "todo")  # its tests are written again
+        to_plan = [q for q in self.hub.answered_since(self.hub.config()["round"]) if q["task"] == HUB_OWNER]
+        self.assertTrue(any("Simplify it" in q["answer"] and "app/convert.py" in q["text"] for q in to_plan))
+
+    def test_an_answer_given_during_a_round_reaches_the_next_plan(self):
+        from rclocal.hub_local import HUB_OWNER
+
+        q = self.hub.ask(HUB_OWNER, "Round to whole dollars?", critical=True, choice="yes")
+        self.hub.answer(q["id"], "yes")
+        self.hub.next_round()
+        self.hub.next_round()  # two rounds go by before a plan runs
+        self.assertIn(q["id"], [a["id"] for a in self.hub.answered_since(self.hub.config()["round"])])
+        self.hub.mark_planned([q["id"]])
+        self.assertNotIn(q["id"], [a["id"] for a in self.hub.answered_since(self.hub.config()["round"])])
+        self.hub.answer(q["id"], "no")  # a changed answer is planned with again
+        self.assertIn(q["id"], [a["id"] for a in self.hub.answered_since(self.hub.config()["round"])])
+
+    def test_i_got_it_keeps_builders_off_a_file_that_went_back_to_todo(self):
+        from rclocal.rounds import I_GOT_IT
+
+        self.run_round(py_script({"app/convert.py": [CONVERT_BAD], "app/report.py": [REPORT_GOOD]}))
+        stuck = next(q for q in self.hub.questions() if q["task"] == "app-convert-py")
+        self.hub.restart("app-convert-py", "something else sent it back")
+        self.hub.answer(stuck["id"], I_GOT_IT)
+        asyncio.run(Round(self.hub, FakeLLM(lambda *a: {})).revisit_stuck())
+        task = self.hub.task("app-convert-py")
+        self.assertEqual((task["status"], task["attempts"]), ("failed", self.hub.config()["max_attempts"]))
 
     def test_stop_cuts_a_round_off_and_puts_its_files_back(self):
         script = py_script({"app/convert.py": [CONVERT_GOOD], "app/report.py": [REPORT_GOOD]})
@@ -1320,6 +1357,15 @@ class FindingsTest(unittest.TestCase):
         self.assertFalse(py.example_ok("total(100, 15)", "round(100 * 1.15)"))
         self.assertEqual(literal_prefix("[58, 57] (whole dollars; [57, 58] is fine too)"), "[58, 57]")
 
+    def test_a_parameter_may_not_hide_an_import(self):
+        from rclocal.rounds import unshadow
+
+        self.assertEqual(unshadow("function splitBill(total, people, splitByPercentage) -> number[]", {"splitByPercentage"}),
+                         "function splitBill(total, people, useSplitByPercentage) -> number[]")
+        code = ("import { splitByPercentage } from './split_by_percentage.js';\n"
+                "export function splitBill(total, people, splitByPercentage) { return splitByPercentage(total, people); }\n")
+        self.assertIn("hides the imported function", STACKS["web"].code_problem(code, "app/bill_parts/split_bill.js"))
+
     def test_logic_files_and_their_tests_stay_off_the_page(self):
         web = STACKS["web"]
         self.assertIn("logic file", web.code_problem("export function toggle(el) { el.classList.toggle('dark'); }", "app/theme.js"))
@@ -1338,6 +1384,13 @@ class FindingsTest(unittest.TestCase):
         self.assertIn("import { calculateTotal } from '../app/x.js';", fixed)
         self.assertIn("t.throwsAsync", web.test_problem(
             "import { test } from 'node:test';\nimport assert from 'node:assert';\ntest('a', async (t) => { await t.throwsAsync(f); });"))
+
+    def test_answers_about_stuck_files_are_not_planned_with(self):
+        from rclocal.rounds import STUCK_OPTIONS, is_stuck_question
+
+        labels = [o["label"] for o in STUCK_OPTIONS]
+        self.assertTrue(is_stuck_question({"task": "app-x-js", "options": labels}))
+        self.assertFalse(is_stuck_question({"task": "app-x-js", "options": ["Right", "Wrong"]}))
 
     def test_a_split_file_passes_its_parts_on(self):
         web = STACKS["web"]
