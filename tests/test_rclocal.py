@@ -198,7 +198,7 @@ class ProtocolTest(unittest.TestCase):
         data_roles = {"brainstormer", "planner", "surveyor", "user", "reviewer", "reporter"}
         self.assertEqual(set(protocol.ROLES), data_roles | set(protocol.CODE_ROLES))
         kinds = {"brainstorm", "planner", "split", "survey", "step", "notes", "page_part", "user_plan", "user_verdict",
-                 "reviewer", "reporter"}
+                 "checklist", "reviewer", "reporter"}
         self.assertEqual(kinds, set(protocol.REPLIES))
         self.assertTrue(all(protocol.ROLE_JOBS.values()))
 
@@ -892,6 +892,9 @@ class TestUsersTest(HubCase):
     def respond(self, role, model, system, user, schema):
         if schema is protocol.USER_PLAN:
             return {"goal": "split a bill", "steps": [{"do": "fill", "target": "bill", "value": "50", "expect": "25"}]}
+        if "Checker:" in system:
+            return {"checks": [{"item": "Split by percentage", "seen_as": "control", "words": ["percent"]},
+                               {"item": "Rounds to whole dollars", "seen_as": "not_on_page", "words": []}]}
         return {"works": False, "wish": "a share button",
                 "problems": [{"what": "each share is the whole bill", "severity": "high", "where": "logic"}]}
 
@@ -909,6 +912,25 @@ class TestUsersTest(HubCase):
 
         rnd.runner.try_as_user = fake_try
         return TestUsers(rnd)
+
+    def test_the_page_check_sends_back_a_page_without_a_must_have(self):
+        project.save_brief(self.hub, {**BRAINSTORM_REPLY["brief"], "look": "light and calm",
+                                      "must_have": ["Split by percentage", "Rounds to whole dollars"]})
+        rnd = self.users().round
+        self.hub.mark_done(DESIGN_TASK, "given")
+        rnd.page_checked = True
+        rnd.runner.last_check = {"inventory": {**self.INVENTORY, "text": "Bill Each", "tone": "dark"}}
+        self.assertTrue(asyncio.run(rnd.check_must_haves()))
+        note = self.hub.task(DESIGN_TASK)["notes"][-1]
+        self.assertIn("Split by percentage (no control mentions percent)", note)
+        self.assertIn("the look is light, but the page starts dark", note)
+        self.assertNotIn("whole dollars", note)  # the page can't show it
+        calls = len(rnd.sched.llm.calls)
+        rnd.runner.last_check["inventory"] = {"controls": [{"id": "mode", "kind": "select", "label": "Split",
+                                                            "options": ["Equal", "By percentage"]}],
+                                              "results": [], "text": "", "tone": "light"}
+        self.assertFalse(asyncio.run(rnd.check_must_haves()))
+        self.assertEqual(len(rnd.sched.llm.calls), calls)  # the checklist is made once per set of must-haves
 
     def test_test_users_send_the_page_back_and_ask_about_results(self):
         results = asyncio.run(self.users().run("Split a bill", self.INVENTORY))

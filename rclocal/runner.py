@@ -70,7 +70,14 @@ const main = document.querySelector('main') || document.body;"""
 # Runs after the app's module script (modules run in order).
 PROBE_TAIL = """<script type="module">
 """ + PAGE_HELPERS + """
-const inventory = { controls: controls(), results: results() };
+const tone = () => {  // whether the page starts light or dark, from the first background that isn't see-through
+  for (const el of [document.body, document.documentElement]) {
+    const c = (getComputedStyle(el).backgroundColor.match(/[\\d.]+/g) || []).map(Number);
+    if (c.length >= 3 && (c.length < 4 || c[3] > 0)) return (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]) / 255 < 0.5 ? 'dark' : 'light';
+  }
+  return 'light';
+};
+const inventory = { controls: controls(), results: results(), text: squash(main.innerText).slice(0, 3000), tone: tone() };
 const before = main.innerText;
 const prefilled = [...document.querySelectorAll('.stat-value, .list li, output')]
   .filter(e => e.offsetParent && /[1-9]/.test(e.innerText)).map(e => e.innerText.trim()).slice(0, 3);

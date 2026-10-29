@@ -195,6 +195,8 @@ class Round:
         await self.share_duplicates()
         if self.recheck_page():
             await self.build_pass(idea)
+        if await self.check_must_haves():
+            await self.build_pass(idea)
 
         self.events.emit("phase", name="verify")
         passed, failing, output = await self.verify()
@@ -1158,6 +1160,44 @@ class Round:
         self.hub._write_text(self.hub.project / "index.html", html)
         self.hub._write_text(self.hub.project / "styles.css", css)
 
+    # The brief's must-haves, checked on the page
+
+    @property
+    def checklist_path(self):
+        return self.hub.root / "checklist.json"
+
+    async def checklist(self, brief):
+        """The checks for the brief's must-haves, made once per set of must-haves. [] when there's nothing to check."""
+        saved = json.loads(self.checklist_path.read_text(encoding="utf-8")) if self.checklist_path.exists() else {}
+        if saved.get("must_have") == brief["must_have"]:
+            return saved["checks"]
+        try:
+            checks = (await agents.checklist(self.sched, brief["must_have"]))["checks"]
+        except LLMError as e:
+            self.events.emit("note", text=f"no must-have checklist this round: {e}")
+            return []
+        self.hub._write(self.checklist_path, {**saved, "must_have": brief["must_have"], "checks": checks})
+        return checks
+
+    async def check_must_haves(self):
+        """Send a working page back when it lacks a must-have the page check can see. True if it was sent back."""
+        brief = project.load_brief(self.hub)
+        inventory = (getattr(self.runner, "last_check", None) or {}).get("inventory")
+        if not (self.page_checked and inventory and brief and brief["must_have"]):
+            return False
+        misses = must_have_misses(await self.checklist(brief), inventory, brief.get("look", ""))
+        if not misses:
+            self.events.emit("note", text="the page has every must-have the page check can see")
+            return False
+        saved = json.loads(self.checklist_path.read_text(encoding="utf-8")) if self.checklist_path.exists() else {}
+        used = saved.get("sent_back", 0)
+        self.events.emit("note", text=f"the page is missing must-haves: {'; '.join(misses)}")
+        if used >= self.cfg["checklist_fixes"] or not any(t["id"] == DESIGN_TASK for t in self.hub.tasks()):
+            return False
+        self.hub._write(self.checklist_path, {**saved, "sent_back": used + 1})
+        self.redo(DESIGN_TASK, "the brief must have these, and the page doesn't: " + "; ".join(misses))
+        return True
+
     def page_problem(self, html):
         guarded = self.stack.guard(html)
         if guarded:
@@ -1430,6 +1470,26 @@ def unshadow(signature, names):
         return part.replace(name.group(1), new, 1)
 
     return m.group(1) + ",".join(rename(p) for p in m.group(2).split(",")) + m.group(3)
+
+
+def must_have_misses(checks, inventory, look=""):
+    """The must-haves a page's controls and text show no sign of, each with what was looked for."""
+    controls = [" ".join([c.get("label", ""), c.get("id", ""), *(c.get("options") or [])]).lower()
+                for c in inventory.get("controls", [])]
+    text = " ".join([inventory.get("text", ""), *inventory.get("results", []), *controls]).lower()
+    misses = []
+    for check in checks:
+        words = [w.strip().lower() for w in check["words"] if w.strip()]
+        if check["seen_as"] == "not_on_page" or not words:
+            continue
+        where = controls if check["seen_as"] == "control" else [text]
+        if not any(w in place for w in words for place in where):
+            what = "no control mentions" if check["seen_as"] == "control" else "nothing on the page says"
+            misses.append(f"{check['item']} ({what} {' or '.join(words)})")
+    tones = [t for t in ("light", "dark") if re.search(rf"\b{t}\b", (look or "").lower())]
+    if len(tones) == 1 and inventory.get("tone") and inventory["tone"] != tones[0]:
+        misses.append(f"the look is {tones[0]}, but the page starts {inventory['tone']}")
+    return misses
 
 
 def is_stuck_question(q):

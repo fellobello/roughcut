@@ -211,6 +211,14 @@ back (`redo page-design --reason "bigger results"`, or the test users) first ask
 designer which one part the change needs, and if the change never passes the check, the
 working page is put back.
 
+**The must-haves are checked on the page.** Every file can pass its tests while the page
+still lacks a must-have, since nothing else compares the page with the brief. Once per set of
+must-haves, a model turns each into a check: a control whose label, id or options has one of
+a few words (a split by percentage needs something that says "percent"), text on the page,
+or nothing the page can show (a rounding rule, which the tests cover). After the page passes
+its check, a must-have with no sign of it, or a page that starts dark when the look is light,
+sends it back to the designer with what's missing (at most `checklist_fixes` times per project).
+
 **Test users.** The file tests and the page check are both checked against the planner's
 contracts, so neither knows whether the app does what you asked for. The test users do:
 each sees only the brief and the controls on screen, plans what they'd do with the results
@@ -293,8 +301,8 @@ Defaults in `.hub/local.json`, picked for a 16 GB Apple M5:
 - `max_parallel_calls` (2), `model_slots` (1 per model) and `max_parallel_tasks` (3) keep
   the machine from being asked for more than it can do at once.
 - `max_tokens` caps every reply, and `call_timeout` (900 s) every call.
-- `test_users` (3), `user_fixes` (2), `design_tries` (3) and `brainstorm_turns` (4) set how
-  much each stage may spend.
+- `test_users` (3), `user_fixes` (2), `checklist_fixes` (2), `design_tries` (3) and
+  `brainstorm_turns` (4) set how much each stage may spend.
 
 Change a role's model with `new ... --model designer=qwen2.5-coder:14b`, or edit `local.json`.
 

@@ -130,6 +130,10 @@ USER_PLAN = _obj(
 # What a test user thought after trying the app. where: "page" (the screen) or "logic" (a wrong result).
 USER_PROBLEM = _obj(["what", "severity", "where"], what=STR, severity=_enum("high", "low"), where=_enum("page", "logic"))
 USER_VERDICT = _obj(["works", "problems", "wish"], works=BOOL, problems=_list(USER_PROBLEM), wish=STR)
+# How the page check can see each must-have: a control whose label, id or options has one of the words,
+# text on the page with one of them, or not at all (a rule about results, say, which the tests cover).
+CHECKLIST = _obj(["checks"], checks=_list(_obj(["item", "seen_as", "words"], item=STR,
+                                               seen_as=_enum("control", "text", "not_on_page"), words=_list(STR))))
 
 # One step of a builder agent: which action to take next. Code never goes in a step:
 # "write" makes the round ask for the file in a separate code reply.
@@ -159,6 +163,7 @@ REPLIES = {
     "page_part": PAGE_PART,
     "user_plan": USER_PLAN,
     "user_verdict": USER_VERDICT,
+    "checklist": CHECKLIST,
     "reviewer": REVIEW,
     "reporter": REPORT,
 }

@@ -165,6 +165,20 @@ async def user_plan(sched, persona, brief, controls):
     return await sched.ask("user", _chat(system, user), f"user:{persona['key']}:plan", reply="user_plan")
 
 
+async def checklist(sched, must_have):
+    """How the page check can tell each must-have is on the page. Returns CHECKLIST data."""
+    system = (
+        "Checker: You turn an app's must-haves into checks a script runs on the finished page. For each must-have, "
+        "copy it into item exactly, and say how it shows: 'control' when the user needs a field, button or choice for "
+        "it (a way to split by percentage, a dark mode toggle), 'text' when it is something the page shows (each "
+        "person's share), or 'not_on_page' when the page can't show it (works offline, rounds to whole dollars). In "
+        "words, give 2 to 4 short words the control's label or the page's text would have, lower case, like "
+        f"[\"percent\", \"percentage\"] or [\"dark\", \"theme\"]. {JSON_ONLY}"
+    )
+    user = _section("Must-haves", "\n".join(f"- {m}" for m in must_have))
+    return await sched.ask("planner", _chat(system, user), "checklist", reply="checklist")
+
+
 async def user_verdict(sched, persona, brief, transcript, facts):
     """What a test user thought of the app after trying it. Returns USER_VERDICT data."""
     system = (

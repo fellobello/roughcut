@@ -50,6 +50,7 @@ DEFAULT_CONFIG = {
     "example_wait": 120,  # seconds a file's tests wait for you to check its examples before going with them
     "test_users": 3,  # test users who try each new page (0 turns them off)
     "user_fixes": 2,  # times test users may send the page back, across all rounds
+    "checklist_fixes": 2,  # times the must-have checklist may send the page back, across all rounds
     "brainstorm_turns": 4,  # most back-and-forth turns before building starts
     # Longest reply per call kind, in tokens. A model that loses track stops here instead of
     # writing until the call times out.
